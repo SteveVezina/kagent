@@ -9,7 +9,7 @@ import (
 	"github.com/kagent-dev/kagent/go/api/adk"
 )
 
-const PinnedPiVersion = "0.85.0"
+const PinnedPiVersion = "0.85.1"
 
 // Config is the runtime-neutral Pi startup configuration derived from a
 // compiler-owned AgentConfig. Credentials remain in the process environment.
