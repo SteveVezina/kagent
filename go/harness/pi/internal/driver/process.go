@@ -65,6 +65,7 @@ func (d *ProcessDriver) Run(ctx context.Context, turn runtime.Turn, sink runtime
 	}
 	args := []string{
 		"--mode", "rpc",
+		"--offline",
 		"--provider", d.config.Provider,
 		"--model", d.config.Model,
 		"--session-dir", d.config.SessionDir,
