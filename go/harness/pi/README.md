@@ -10,27 +10,34 @@ adding a first-class Pi Harness API.
 
 ## Code structure
 
-The controller keeps Kubernetes resolution and secret handling. The Pi adapter
-receives the compiler-owned BYO `AgentConfig` through `KAGENT_CONFIG_JSON` and
-materializes only the native Pi configuration required to preserve those
-semantics.
+The controller keeps Kubernetes resolution and secret handling. During the BYO
+prototype phase, the Pi adapter receives the compiler-owned ADK `AgentConfig`
+through `KAGENT_CONFIG_JSON`, normalizes the supported subset into the same
+versioned runtime-config boundary used by the native Harness adapters, and
+materializes only the Pi configuration required to preserve those semantics.
 
 | Path | Look here for |
 | --- | --- |
 | [`../../core/internal/translator/byo`](../../core/internal/translator/byo) | Existing BYO compiler and resolved runtime revision |
-| [`config/config.go`](config/config.go) | Mapping the supported ADK configuration subset to Pi |
+| [`config/config.go`](config/config.go) | Versioned Pi runtime config, strict parsing/validation, pinned defaults, and BYO ADK mapping |
 | [`cmd/main.go`](cmd/main.go) | Actor startup, Pi version validation, continuation-store wiring, and private A2A startup |
-| [`internal/adapter`](internal/adapter) | Durable Pi state and compiler-owned `models.json` materialization |
+| [`internal/adapter`](internal/adapter) | Durable Pi state, environment isolation, and compiler-owned `models.json` materialization |
 | [`internal/driver`](internal/driver) | RPC lifecycle, JSONL framing, event translation, exact session resume, cancellation, and process supervision |
+| [`testdata`](testdata) | Checked-in Pi RPC success, failure, and tool-event transcripts |
+
+A future first-class Pi Harness compiler can emit the versioned Pi runtime
+configuration directly without changing the Actor-side driver contract.
 
 ## Implemented support
 
-- Pi Coding Agent `0.85.1`, pinned and validated at Actor startup.
+- Pi Coding Agent `0.85.0`, pinned to the currently published npm package and
+  validated at image build and Actor startup.
 - OpenAI and Anthropic through Secret-backed environment credentials resolved by
   kagent's existing BYO compiler.
 - OpenAI-compatible gateways through an optional absolute `baseUrl`, materialized
   as a private Pi `models.json` owned by the compiled runtime revision.
-- OpenAI Chat Completions and Responses API selection for gateway-backed models.
+- OpenAI Chat Completions and Responses API selection through the compiler-owned
+  Pi provider definition.
 - Compiler-owned system prompts.
 - Streaming assistant text and native tool execution events.
 - Exact native Pi session resume through the kagent continuation store.
@@ -38,16 +45,20 @@ semantics.
   group termination.
 - Durable Pi session state under `/data/pi/sessions` and workspace state under
   `/data/workspace`.
+- Bounded RPC frame and stderr handling, strict runtime config parsing, and
+  checked-in RPC transcript tests matching the native Harness test style.
 
 The prototype fails closed for MCP, Shared/Dedicated agent tools, Agent Plugin
-resources, kagent memory/context configuration, custom model headers/TLS, API-key
-passthrough, and custom Anthropic endpoints. Those features should be added only
-when their semantics can be represented faithfully and covered by conformance
-or E2E tests.
+resources, kagent memory/context configuration, model tuning, custom model
+headers/TLS, API-key passthrough, and custom Anthropic endpoints. Those features
+should be added only when their semantics can be represented faithfully and
+covered by conformance or E2E tests.
 
 Pi's workspace/user resource auto-discovery is disabled for this runtime so
 extensions, skills, context files, prompt templates, and themes cannot silently
-change compiler-owned behavior.
+change compiler-owned behavior. Pi also runs in offline startup mode, which
+prevents update checks, package checks, and install telemetry while still
+allowing configured model-provider requests.
 
 Runtime configuration is supplied through `KAGENT_CONFIG_JSON` and
 `KAGENT_AGENT_CARD_JSON`. Private A2A is served on port 80 and readiness on
@@ -62,8 +73,13 @@ and Claude Harnesses:
 make build-pi-harness
 ```
 
-The image installs Pi using the upstream recommended npm path with lifecycle
-scripts disabled and runs the adapter as UID/GID `65532`.
+The runtime image uses Node 24, installs an exact Pi package version with npm
+lifecycle scripts disabled, verifies `pi --version` and `pi --help` during the
+image build, and runs the adapter as UID/GID `65532`.
+
+The shared E2E job builds the Pi image, resolves it to a digest, applies a BYO
+Harness fixture, runs the real Pi binary against kagent's mock OpenAI endpoint,
+and verifies streaming, persisted task state, and native Pi session resume.
 
 ## BYO example
 
