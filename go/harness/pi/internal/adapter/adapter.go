@@ -50,10 +50,8 @@ func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
 			return nil, fmt.Errorf("prepare Pi directory %q: %w", directory, err)
 		}
 	}
-	if cfg.Provider.Name == "kagent-openai" {
-		if err := writeModelsConfig(piHome, cfg); err != nil {
-			return nil, err
-		}
+	if err := writeModelsConfig(piHome, cfg); err != nil {
+		return nil, err
 	}
 	environment := append([]string(nil), input.Environment...)
 	environment = setEnvironment(environment, piHomeEnv, piHome)
@@ -68,15 +66,15 @@ func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
 	}), nil
 }
 
-// writeModelsConfig translates the compiler-owned OpenAI provider into Pi's
-// native models.json without copying credential values into durable state.
+// writeModelsConfig translates the compiler-owned provider into Pi's native
+// models.json without copying credential values into durable state.
 func writeModelsConfig(piHome string, cfg config.Config) error {
 	modelConfig := map[string]any{
 		"providers": map[string]any{
 			cfg.Provider.Name: map[string]any{
 				"baseUrl": cfg.Provider.BaseURL,
 				"api":     cfg.Provider.API,
-				"apiKey":  "$OPENAI_API_KEY",
+				"apiKey":  "$" + cfg.Provider.APIKeyEnv,
 				"models": []map[string]any{{
 					"id": cfg.Model,
 				}},
