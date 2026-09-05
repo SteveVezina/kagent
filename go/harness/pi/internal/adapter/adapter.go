@@ -1,13 +1,12 @@
-// Package adapter validates BYO compiler output and constructs the Pi process driver.
+// Package adapter validates BYO compiler output and materializes compiler-owned Pi state.
 package adapter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/kagent-dev/kagent/go/api/adk"
 	"github.com/kagent-dev/kagent/go/harness/internal/utils"
@@ -29,7 +28,10 @@ type Input struct {
 // New validates the supported BYO config subset, prepares private Pi state,
 // materializes compiler-owned native Pi configuration, and constructs the RPC
 // process driver.
-func New(input Input) (*driver.ProcessDriver, error) {
+func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var agent adk.AgentConfig
 	if err := json.Unmarshal(input.ConfigJSON, &agent); err != nil {
 		return nil, fmt.Errorf("decode BYO agent config: %w", err)
@@ -48,29 +50,32 @@ func New(input Input) (*driver.ProcessDriver, error) {
 			return nil, fmt.Errorf("prepare Pi directory %q: %w", directory, err)
 		}
 	}
-	if cfg.BaseURL != "" {
+	if cfg.Provider.Name == "kagent-openai" {
 		if err := writeModelsConfig(piHome, cfg); err != nil {
 			return nil, err
 		}
 	}
 	environment := append([]string(nil), input.Environment...)
 	environment = setEnvironment(environment, piHomeEnv, piHome)
+	environment = setEnvironment(environment, "PI_OFFLINE", "1")
 	environment = setEnvironment(environment, "PI_SKIP_VERSION_CHECK", "1")
 	environment = setEnvironment(environment, "PI_TELEMETRY", "0")
 	return driver.NewProcessDriver(driver.ProcessConfig{
-		Executable: "pi", ExpectedVersion: config.PinnedPiVersion, StrictVersion: true,
-		Workspace: input.Workspace, SessionDir: sessionDir, Provider: cfg.Provider, Model: cfg.Model,
+		Executable: cfg.PiExecutable, ExpectedVersion: cfg.ExpectedPiVersion, StrictVersion: cfg.StrictVersion,
+		Workspace: input.Workspace, SessionDir: sessionDir, Provider: cfg.Provider.Name, Model: cfg.Model,
 		SystemPrompt: cfg.SystemPrompt, Environment: environment,
-		MaxLineBytes: 1 << 20, MaxStderrBytes: 64 << 10, InterruptGrace: 2 * time.Second,
+		MaxLineBytes: cfg.MaxFrameBytes, MaxStderrBytes: cfg.MaxStderrBytes, InterruptGrace: cfg.InterruptGrace(),
 	}), nil
 }
 
+// writeModelsConfig translates the compiler-owned OpenAI provider into Pi's
+// native models.json without copying credential values into durable state.
 func writeModelsConfig(piHome string, cfg config.Config) error {
 	modelConfig := map[string]any{
 		"providers": map[string]any{
-			cfg.Provider: map[string]any{
-				"baseUrl": cfg.BaseURL,
-				"api":     cfg.API,
+			cfg.Provider.Name: map[string]any{
+				"baseUrl": cfg.Provider.BaseURL,
+				"api":     cfg.Provider.API,
 				"apiKey":  "$OPENAI_API_KEY",
 				"models": []map[string]any{{
 					"id": cfg.Model,
@@ -83,12 +88,8 @@ func writeModelsConfig(piHome string, cfg config.Config) error {
 		return fmt.Errorf("encode Pi models config: %w", err)
 	}
 	contents = append(contents, '\n')
-	path := filepath.Join(piHome, "models.json")
-	if err := os.WriteFile(path, contents, 0o600); err != nil {
-		return fmt.Errorf("write Pi models config: %w", err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("secure Pi models config: %w", err)
+	if err := utils.ReplacePrivateFile(filepath.Join(piHome, "models.json"), contents); err != nil {
+		return fmt.Errorf("materialize Pi models configuration: %w", err)
 	}
 	return nil
 }
