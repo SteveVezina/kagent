@@ -7,10 +7,16 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	a2atype "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2apb/v1/pbconv"
+	"github.com/google/uuid"
+	apiv1alpha1 "github.com/kagent-dev/kagent/go/api/gen/kagent/api/v1alpha1"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,6 +56,86 @@ func TestE2EPiMockInteractionResume(t *testing.T) {
 	_, _, resumed := fixture.send(t, "Return exactly PI_MOCK_SECOND.")
 	if resumed.Status.State != a2atype.TaskStateCompleted || !strings.Contains(taskText(resumed), "PI_MOCK_SECOND") {
 		t.Fatalf("resumed Pi task state = %s, text = %q, want completed PI_MOCK_SECOND", resumed.Status.State, taskText(resumed))
+	}
+}
+
+// TestE2EPiMockCheckpointForkAndResume mirrors the native Codex checkpoint
+// coverage. The fork must inherit the durable Pi session and continuation state
+// from the checkpoint, then resume that exact native session on its next turn.
+func TestE2EPiMockCheckpointForkAndResume(t *testing.T) {
+	target := interactionTarget(t)
+	modelURL := reachableModelURL(t, startMockLLMServer(t, piInteractionMocks, "mocks/invoke_pi_agent.json"))
+	template := createPiMockTemplate(t, modelURL)
+	fixture := newInteractionFixtureForHarnessTemplate(t, target, piE2EHarness, template)
+
+	_, _, first := fixture.send(t, "Return exactly PI_MOCK_FIRST.")
+	if first.Status.State != a2atype.TaskStateCompleted {
+		t.Fatalf("initial Pi task state = %s, want COMPLETED", first.Status.State)
+	}
+
+	created, err := fixture.checkpoints.CreateCheckpoint(fixture.ctx, &apiv1alpha1.CreateCheckpointRequest{
+		Namespace: "kagent", AgentInstanceId: fixture.instanceID, RequestId: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("create Pi checkpoint: %v", err)
+	}
+	checkpointID := created.GetCheckpoint().GetId()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(metadata.AppendToOutgoingContext(context.Background(), "x-user-id", "e2e"), time.Minute)
+		defer cancel()
+		_, cleanupErr := fixture.checkpoints.DeleteCheckpoint(ctx, &apiv1alpha1.DeleteCheckpointRequest{
+			Namespace: "kagent", CheckpointId: checkpointID,
+		})
+		if cleanupErr != nil && status.Code(cleanupErr) != codes.NotFound {
+			t.Errorf("delete Pi checkpoint: %v", cleanupErr)
+		}
+	})
+
+	forked, err := fixture.checkpoints.ForkAgentInstance(fixture.ctx, &apiv1alpha1.ForkAgentInstanceRequest{
+		Namespace: "kagent", CheckpointId: checkpointID, RequestId: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("fork Pi AgentInstance: %v", err)
+	}
+	fork := forked.GetAgentInstance()
+	if fork.GetState() != apiv1alpha1.AgentInstanceState_AGENT_INSTANCE_STATE_READY {
+		t.Fatalf("forked Pi AgentInstance state = %s, want READY", fork.GetState())
+	}
+	forkID := fork.GetId()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(metadata.AppendToOutgoingContext(context.Background(), "x-user-id", "e2e"), time.Minute)
+		defer cancel()
+		_, cleanupErr := fixture.instances.DeleteAgentInstance(ctx, &apiv1alpha1.DeleteAgentInstanceRequest{
+			Namespace: "kagent", AgentInstanceId: forkID,
+		})
+		if cleanupErr != nil && status.Code(cleanupErr) != codes.NotFound {
+			t.Errorf("delete forked Pi AgentInstance: %v", cleanupErr)
+		}
+	})
+
+	forkCtx, forkCancel := context.WithTimeout(metadata.AppendToOutgoingContext(t.Context(),
+		"x-user-id", "e2e",
+		"x-kagent-agent-instance-namespace", "kagent",
+		"x-kagent-agent-instance-id", forkID,
+	), 4*time.Minute)
+	t.Cleanup(forkCancel)
+	listRequest, err := pbconv.ToProtoListTasksRequest(&a2atype.ListTasksRequest{ContextID: forkID, PageSize: 10})
+	if err != nil {
+		t.Fatalf("build forked Pi task list request: %v", err)
+	}
+	listedResponse, err := fixture.client.ListTasks(forkCtx, listRequest)
+	if err != nil {
+		t.Fatalf("list forked Pi tasks: %v", err)
+	}
+	listed, err := pbconv.FromProtoListTasksResponse(listedResponse)
+	if err != nil || len(listed.Tasks) != 1 || listed.Tasks[0].ContextID != forkID || listed.Tasks[0].Status.State != a2atype.TaskStateCompleted {
+		t.Fatalf("forked Pi tasks = %+v, error %v; want one copied task in context %s", listed, err, forkID)
+	}
+
+	forkFixture := &interactionFixture{ctx: forkCtx, client: fixture.client, instanceID: forkID}
+	_, _, resumed := forkFixture.send(t, "Return exactly PI_MOCK_SECOND.")
+	if resumed.Status.State != a2atype.TaskStateCompleted || !strings.Contains(taskText(resumed), "PI_MOCK_SECOND") {
+		t.Fatalf("forked Pi task state = %s, text = %q, want completed resumed response", resumed.Status.State, taskText(resumed))
 	}
 }
 
