@@ -15,7 +15,11 @@ func TestFromAgentConfigMapsOpenAI(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, Config{
-		Provider: "openai", Model: "gpt-5.4", SystemPrompt: "You are a Kubernetes troubleshooting agent.",
+		Provider: "kagent-openai",
+		Model: "gpt-5.4",
+		SystemPrompt: "You are a Kubernetes troubleshooting agent.",
+		BaseURL: "https://api.openai.com/v1",
+		API: "openai-completions",
 	}, cfg)
 }
 
@@ -39,16 +43,16 @@ func TestFromAgentConfigMapsOpenAIGateway(t *testing.T) {
 	}, cfg)
 }
 
-func TestFromAgentConfigMapsOpenAIResponsesGateway(t *testing.T) {
+func TestFromAgentConfigMapsOpenAIResponses(t *testing.T) {
 	cfg, err := FromAgentConfig(&adk.AgentConfig{
 		Model: &adk.OpenAI{
 			BaseModel: adk.BaseModel{Model: "gpt-5.4"},
-			BaseUrl:   "https://gateway.example.com/v1",
 			APIFormat: "responses",
 		},
 	})
 
 	require.NoError(t, err)
+	require.Equal(t, "https://api.openai.com/v1", cfg.BaseURL)
 	require.Equal(t, "openai-responses", cfg.API)
 }
 
@@ -56,12 +60,23 @@ func TestFromAgentConfigRejectsUnknownOpenAIAPIFormat(t *testing.T) {
 	_, err := FromAgentConfig(&adk.AgentConfig{
 		Model: &adk.OpenAI{
 			BaseModel: adk.BaseModel{Model: "gpt-5.4"},
-			BaseUrl:   "https://gateway.example.com/v1",
 			APIFormat: "future-api",
 		},
 	})
 
 	require.ErrorContains(t, err, "OpenAI API format")
+}
+
+func TestFromAgentConfigRejectsUnsupportedOpenAITuning(t *testing.T) {
+	temperature := 0.2
+	_, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.OpenAI{
+			BaseModel:   adk.BaseModel{Model: "gpt-5.4"},
+			Temperature: &temperature,
+		},
+	})
+
+	require.ErrorContains(t, err, "OpenAI model tuning")
 }
 
 func TestFromAgentConfigMapsAnthropic(t *testing.T) {
@@ -72,6 +87,18 @@ func TestFromAgentConfigMapsAnthropic(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, Config{Provider: "anthropic", Model: "claude-sonnet-4-5", SystemPrompt: "Be concise."}, cfg)
+}
+
+func TestFromAgentConfigRejectsUnsupportedAnthropicTuning(t *testing.T) {
+	maxTokens := 2048
+	_, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.Anthropic{
+			BaseModel: adk.BaseModel{Model: "claude-sonnet-4-5"},
+			MaxTokens: &maxTokens,
+		},
+	})
+
+	require.ErrorContains(t, err, "Anthropic model tuning")
 }
 
 func TestFromAgentConfigRejectsUnsupportedAgentFeatures(t *testing.T) {
