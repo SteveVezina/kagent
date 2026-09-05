@@ -51,20 +51,37 @@ func TestNewMaterializesCompilerOwnedOpenAIGateway(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, runner)
-	modelsPath := filepath.Join(durable, "pi", "models.json")
-	contents, err := os.ReadFile(modelsPath)
-	require.NoError(t, err)
-	var models map[string]any
-	require.NoError(t, json.Unmarshal(contents, &models))
-	provider := models["providers"].(map[string]any)["kagent-openai"].(map[string]any)
+	provider := readMaterializedProvider(t, durable, "kagent-openai")
 	require.Equal(t, "http://mock-llm:8080/v1", provider["baseUrl"])
 	require.Equal(t, "openai-completions", provider["api"])
 	require.Equal(t, "$OPENAI_API_KEY", provider["apiKey"])
 	model := provider["models"].([]any)[0].(map[string]any)
 	require.Equal(t, "gpt-4.1-mini", model["id"])
-	info, err := os.Stat(modelsPath)
+}
+
+func TestNewMaterializesCompilerOwnedAnthropicGateway(t *testing.T) {
+	directory := t.TempDir()
+	workspace := filepath.Join(directory, "workspace")
+	durable := filepath.Join(directory, "data")
+	configJSON := []byte(`{
+		"model":{"type":"anthropic","model":"claude-custom","base_url":"https://gateway.example.com/anthropic"},
+		"description":"",
+		"instruction":"reply briefly",
+		"stream":true
+	}`)
+
+	runner, err := New(context.Background(), Input{
+		ConfigJSON: configJSON, Workspace: workspace, DurableDir: durable, Environment: append(os.Environ(), "ANTHROPIC_API_KEY=fake"),
+	})
+
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	require.NotNil(t, runner)
+	provider := readMaterializedProvider(t, durable, "kagent-anthropic")
+	require.Equal(t, "https://gateway.example.com/anthropic", provider["baseUrl"])
+	require.Equal(t, "anthropic-messages", provider["api"])
+	require.Equal(t, "$ANTHROPIC_API_KEY", provider["apiKey"])
+	model := provider["models"].([]any)[0].(map[string]any)
+	require.Equal(t, "claude-custom", model["id"])
 }
 
 func TestNewRejectsRelativeActorPaths(t *testing.T) {
@@ -74,4 +91,18 @@ func TestNewRejectsRelativeActorPaths(t *testing.T) {
 	})
 
 	require.ErrorContains(t, err, "absolute paths")
+}
+
+func readMaterializedProvider(t *testing.T, durable, providerName string) map[string]any {
+	t.Helper()
+	modelsPath := filepath.Join(durable, "pi", "models.json")
+	contents, err := os.ReadFile(modelsPath)
+	require.NoError(t, err)
+	var models map[string]any
+	require.NoError(t, json.Unmarshal(contents, &models))
+	provider := models["providers"].(map[string]any)[providerName].(map[string]any)
+	info, err := os.Stat(modelsPath)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	return provider
 }
