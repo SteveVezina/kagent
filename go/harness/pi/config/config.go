@@ -10,7 +10,10 @@ import (
 	"github.com/kagent-dev/kagent/go/api/adk"
 )
 
-const PinnedPiVersion = "0.85.1"
+const (
+	PinnedPiVersion     = "0.85.1"
+	defaultOpenAIBaseURL = "https://api.openai.com/v1"
+)
 
 // Config is the runtime-neutral Pi startup configuration derived from a
 // compiler-owned AgentConfig. Credentials remain in the process environment.
@@ -46,26 +49,30 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 		if err := validateBaseModel(model.BaseModel); err != nil {
 			return Config{}, err
 		}
-		cfg.Provider, cfg.Model = "openai", strings.TrimSpace(model.Model)
+		if err := validateOpenAITuning(model); err != nil {
+			return Config{}, err
+		}
+		cfg.Provider, cfg.Model = "kagent-openai", strings.TrimSpace(model.Model)
 		cfg.BaseURL = strings.TrimSpace(model.BaseUrl)
-		if cfg.BaseURL != "" {
-			if err := validateHTTPURL(cfg.BaseURL); err != nil {
-				return Config{}, fmt.Errorf("OpenAI base URL: %w", err)
-			}
-			cfg.Provider = "kagent-openai"
-			switch strings.TrimSpace(model.APIFormat) {
-			case "", "chatCompletions":
-				cfg.API = "openai-completions"
-			case "responses":
-				cfg.API = "openai-responses"
-			default:
-				return Config{}, fmt.Errorf("Pi BYO prototype does not support OpenAI API format %q", model.APIFormat)
-			}
-		} else if strings.TrimSpace(model.APIFormat) != "" && strings.TrimSpace(model.APIFormat) != "chatCompletions" && strings.TrimSpace(model.APIFormat) != "responses" {
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = defaultOpenAIBaseURL
+		}
+		if err := validateHTTPURL(cfg.BaseURL); err != nil {
+			return Config{}, fmt.Errorf("OpenAI base URL: %w", err)
+		}
+		switch strings.TrimSpace(model.APIFormat) {
+		case "", "chatCompletions":
+			cfg.API = "openai-completions"
+		case "responses":
+			cfg.API = "openai-responses"
+		default:
 			return Config{}, fmt.Errorf("Pi BYO prototype does not support OpenAI API format %q", model.APIFormat)
 		}
 	case *adk.Anthropic:
 		if err := validateBaseModel(model.BaseModel); err != nil {
+			return Config{}, err
+		}
+		if err := validateAnthropicTuning(model); err != nil {
 			return Config{}, err
 		}
 		if strings.TrimSpace(model.BaseUrl) != "" {
@@ -79,6 +86,22 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 		return Config{}, fmt.Errorf("Pi model name is required")
 	}
 	return cfg, nil
+}
+
+func validateOpenAITuning(model *adk.OpenAI) error {
+	if model.FrequencyPenalty != nil || model.MaxTokens != nil || model.MaxCompletionTokens != nil ||
+		model.N != nil || model.PresencePenalty != nil || model.ReasoningEffort != nil || model.Seed != nil ||
+		model.Temperature != nil || model.Timeout != nil || model.TopP != nil || model.TokenExchange != nil {
+		return fmt.Errorf("Pi BYO prototype does not support OpenAI model tuning yet")
+	}
+	return nil
+}
+
+func validateAnthropicTuning(model *adk.Anthropic) error {
+	if model.MaxTokens != nil || model.Temperature != nil || model.TopP != nil || model.TopK != nil || model.Timeout != nil {
+		return fmt.Errorf("Pi BYO prototype does not support Anthropic model tuning yet")
+	}
+	return nil
 }
 
 func validateHTTPURL(value string) error {
