@@ -360,7 +360,7 @@ use-kind-cluster: ## Merge kind kubeconfig and set kagent as the default namespa
 	kubectl config set-context kind-$(KIND_CLUSTER_NAME) --namespace kagent || true
 
 .PHONY: delete-kind-cluster
-delete-kind-cluster: ## Delete the kind cluster
+delete-kind-cluster: ## Delete the local kind cluster
 	kind delete cluster --name $(KIND_CLUSTER_NAME)
 
 
@@ -648,6 +648,7 @@ prune-kind-cluster: ## Remove dangling container images from the kind node
 
 .PHONY: prune-images
 prune-images: ## Remove old kagent images and dangling images from the local daemon
+	echo "Pruning dangling container images ..."
 	$(CONTAINER_RUNTIME) images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | \
 	grep -v ":$(VERSION) " | grep kagent | grep -v '<none>' | awk '{print $$2}' | xargs -r $(CONTAINER_RUNTIME) rmi || :
 	$(CONTAINER_RUNTIME) images --filter dangling=true -q | xargs -r $(CONTAINER_RUNTIME) rmi || :
