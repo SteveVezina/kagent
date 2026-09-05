@@ -1,0 +1,77 @@
+{
+  "openai": [
+    {
+      "name": "pi_builtin_start",
+      "match": {
+        "match_type": "contains",
+        "message": {
+          "content": "Run the requested shell command.",
+          "role": "user"
+        }
+      },
+      "response": {
+        "id": "chatcmpl-pi-builtin-start",
+        "object": "chat.completion",
+        "created": 1677652290,
+        "model": "gpt-4.1-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_pi_bash",
+                  "type": "function",
+                  "function": {
+                    "name": "bash",
+                    "arguments": "{\"command\":\"printf PI_BUILTIN_TOOL_FILE\"}"
+                  }
+                }
+              ]
+            },
+            "finish_reason": "tool_calls"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 10,
+          "completion_tokens": 8,
+          "total_tokens": 18
+        }
+      }
+    },
+    {
+      "name": "pi_builtin_result",
+      "match": {
+        "match_type": "contains",
+        "message": {
+          "content": "PI_BUILTIN_TOOL_FILE",
+          "role": "tool",
+          "tool_call_id": "call_pi_bash"
+        }
+      },
+      "response": {
+        "id": "chatcmpl-pi-builtin-done",
+        "object": "chat.completion",
+        "created": 1677652291,
+        "model": "gpt-4.1-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "PI_BUILTIN_TOOL_DONE"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 14,
+          "completion_tokens": 5,
+          "total_tokens": 19
+        }
+      }
+    }
+  ]
+}
