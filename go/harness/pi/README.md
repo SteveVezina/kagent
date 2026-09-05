@@ -78,8 +78,11 @@ lifecycle scripts disabled, verifies `pi --version` and `pi --help` during the
 image build, and runs the adapter as UID/GID `65532`.
 
 The shared E2E job builds the Pi image, resolves it to a digest, applies a BYO
-Harness fixture, runs the real Pi binary against kagent's mock OpenAI endpoint,
-and verifies streaming, persisted task state, and native Pi session resume.
+Harness fixture, and runs the real Pi binary against kagent's mock OpenAI
+endpoint. Pi E2E coverage mirrors the native Harness progression for the
+capabilities currently implemented: public A2A streaming, persisted task state,
+native Pi session resume, Substrate checkpoint/fork resume, and real built-in
+`bash` execution with streamed and persisted A2A tool events.
 
 ## BYO example
 
