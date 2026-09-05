@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestNewPreparesPrivatePiState(t *testing.T) {
 		"stream":true
 	}`)
 
-	runner, err := New(Input{
+	runner, err := New(context.Background(), Input{
 		ConfigJSON: configJSON, Workspace: workspace, DurableDir: durable, Environment: os.Environ(),
 	})
 
@@ -44,7 +45,7 @@ func TestNewMaterializesCompilerOwnedOpenAIGateway(t *testing.T) {
 		"stream":true
 	}`)
 
-	runner, err := New(Input{
+	runner, err := New(context.Background(), Input{
 		ConfigJSON: configJSON, Workspace: workspace, DurableDir: durable, Environment: append(os.Environ(), "OPENAI_API_KEY=fake"),
 	})
 
@@ -67,7 +68,7 @@ func TestNewMaterializesCompilerOwnedOpenAIGateway(t *testing.T) {
 }
 
 func TestNewRejectsRelativeActorPaths(t *testing.T) {
-	_, err := New(Input{
+	_, err := New(context.Background(), Input{
 		ConfigJSON: []byte(`{"model":{"type":"anthropic","model":"claude-sonnet-4-5"},"description":"","instruction":"help"}`),
 		Workspace: "workspace", DurableDir: "data",
 	})
