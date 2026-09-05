@@ -57,7 +57,7 @@ func run(ctx context.Context, check bool, getenv func(string) string, environmen
 	if strings.TrimSpace(card.Name) == "" {
 		return fmt.Errorf("agent card name is required")
 	}
-	runner, err := adapter.New(adapter.Input{
+	runner, err := adapter.New(ctx, adapter.Input{
 		ConfigJSON: configJSON, Workspace: dataDir + "/workspace", DurableDir: dataDir, Environment: environment,
 	})
 	if err != nil {
@@ -79,9 +79,7 @@ func run(ctx context.Context, check bool, getenv func(string) string, environmen
 	if err != nil {
 		return err
 	}
-	application, err := app.New(app.AppConfig{
-		AgentCard: card, Port: privatePort, AppName: card.Name, Logger: logging.FromContext(ctx),
-	}, executor)
+	application, err := app.New(app.AppConfig{AgentCard: card, Port: privatePort, AppName: card.Name, Logger: logging.FromContext(ctx)}, executor)
 	if err != nil {
 		return fmt.Errorf("construct private A2A app: %w", err)
 	}
