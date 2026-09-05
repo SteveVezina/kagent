@@ -34,10 +34,12 @@ configuration directly without changing the Actor-side driver contract.
   validated at image build and Actor startup.
 - OpenAI and Anthropic through Secret-backed environment credentials resolved by
   kagent's existing BYO compiler.
-- OpenAI-compatible gateways through an optional absolute `baseUrl`, materialized
-  as a private Pi `models.json` owned by the compiled runtime revision.
-- OpenAI Chat Completions and Responses API selection through the compiler-owned
-  Pi provider definition.
+- Compiler-owned Pi providers for both OpenAI and Anthropic, so arbitrary valid
+  kagent model IDs do not depend on Pi's built-in model catalog.
+- Custom OpenAI and Anthropic base URLs materialized into a private Pi
+  `models.json` owned by the compiled runtime revision.
+- OpenAI Chat Completions and Responses API selection and Anthropic Messages
+  selection through compiler-owned provider definitions.
 - Compiler-owned system prompts.
 - Streaming assistant text and native tool execution events.
 - Exact native Pi session resume through the kagent continuation store.
@@ -50,9 +52,9 @@ configuration directly without changing the Actor-side driver contract.
 
 The prototype fails closed for MCP, Shared/Dedicated agent tools, Agent Plugin
 resources, kagent memory/context configuration, model tuning, custom model
-headers/TLS, API-key passthrough, and custom Anthropic endpoints. Those features
-should be added only when their semantics can be represented faithfully and
-covered by conformance or E2E tests.
+headers/TLS, and API-key passthrough. Those features should be added only when
+their semantics can be represented faithfully and covered by conformance or E2E
+tests.
 
 Pi's workspace/user resource auto-discovery is disabled for this runtime so
 extensions, skills, context files, prompt templates, and themes cannot silently
