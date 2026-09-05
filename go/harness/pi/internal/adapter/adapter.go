@@ -4,6 +4,7 @@ package adapter
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,7 +27,8 @@ type Input struct {
 }
 
 // New validates the supported BYO config subset, prepares private Pi state,
-// and constructs the RPC process driver.
+// materializes compiler-owned native Pi configuration, and constructs the RPC
+// process driver.
 func New(input Input) (*driver.ProcessDriver, error) {
 	var agent adk.AgentConfig
 	if err := json.Unmarshal(input.ConfigJSON, &agent); err != nil {
@@ -46,6 +48,11 @@ func New(input Input) (*driver.ProcessDriver, error) {
 			return nil, fmt.Errorf("prepare Pi directory %q: %w", directory, err)
 		}
 	}
+	if cfg.BaseURL != "" {
+		if err := writeModelsConfig(piHome, cfg); err != nil {
+			return nil, err
+		}
+	}
 	environment := append([]string(nil), input.Environment...)
 	environment = setEnvironment(environment, piHomeEnv, piHome)
 	environment = setEnvironment(environment, "PI_SKIP_VERSION_CHECK", "1")
@@ -56,6 +63,34 @@ func New(input Input) (*driver.ProcessDriver, error) {
 		SystemPrompt: cfg.SystemPrompt, Environment: environment,
 		MaxLineBytes: 1 << 20, MaxStderrBytes: 64 << 10, InterruptGrace: 2 * time.Second,
 	}), nil
+}
+
+func writeModelsConfig(piHome string, cfg config.Config) error {
+	modelConfig := map[string]any{
+		"providers": map[string]any{
+			cfg.Provider: map[string]any{
+				"baseUrl": cfg.BaseURL,
+				"api":     cfg.API,
+				"apiKey":  "$OPENAI_API_KEY",
+				"models": []map[string]any{{
+					"id": cfg.Model,
+				}},
+			},
+		},
+	}
+	contents, err := json.MarshalIndent(modelConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode Pi models config: %w", err)
+	}
+	contents = append(contents, '\n')
+	path := filepath.Join(piHome, "models.json")
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		return fmt.Errorf("write Pi models config: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("secure Pi models config: %w", err)
+	}
+	return nil
 }
 
 func setEnvironment(environment []string, name, value string) []string {
