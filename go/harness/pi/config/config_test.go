@@ -13,7 +13,7 @@ func TestPinnedPiVersionMatchesPublishedPackage(t *testing.T) {
 }
 
 func TestProductionUsesPinnedRuntimeDefaults(t *testing.T) {
-	provider := Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions"}
+	provider := Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY"}
 	cfg := Production(provider, "gpt-5.4", "help")
 
 	require.Equal(t, Version, cfg.Version)
@@ -29,7 +29,7 @@ func TestProductionUsesPinnedRuntimeDefaults(t *testing.T) {
 }
 
 func TestParseRoundTripsProductionConfig(t *testing.T) {
-	want := Production(Provider{Name: "anthropic"}, "claude-sonnet-4-5", "be concise")
+	want := Production(Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY"}, "claude-sonnet-4-5", "be concise")
 	raw, err := json.Marshal(want)
 	require.NoError(t, err)
 
@@ -45,7 +45,7 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 		"expected_pi_version":"0.85.0",
 		"strict_version":true,
 		"model":"gpt-5.4",
-		"provider":{"name":"kagent-openai","base_url":"https://api.openai.com/v1","api":"openai-completions"},
+		"provider":{"name":"kagent-openai","base_url":"https://api.openai.com/v1","api":"openai-completions","api_key_env":"OPENAI_API_KEY"},
 		"max_frame_bytes":1048576,
 		"max_stderr_bytes":65536,
 		"interrupt_grace_millis":2000,
@@ -56,7 +56,7 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 }
 
 func TestParseRejectsWrongVersion(t *testing.T) {
-	cfg := Production(Provider{Name: "anthropic"}, "claude-sonnet-4-5", "")
+	cfg := Production(Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY"}, "claude-sonnet-4-5", "")
 	cfg.Version++
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestFromAgentConfigMapsOpenAI(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, Production(
-		Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions"},
+		Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY"},
 		"gpt-5.4",
 		"You are a Kubernetes troubleshooting agent.",
 	), cfg)
@@ -91,7 +91,7 @@ func TestFromAgentConfigMapsOpenAIGateway(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, Production(
-		Provider{Name: "kagent-openai", BaseURL: "http://mock-llm.kagent.svc.cluster.local/v1", API: "openai-completions"},
+		Provider{Name: "kagent-openai", BaseURL: "http://mock-llm.kagent.svc.cluster.local/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY"},
 		"gpt-4.1-mini",
 		"Reply briefly.",
 	), cfg)
@@ -140,7 +140,26 @@ func TestFromAgentConfigMapsAnthropic(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, Production(Provider{Name: "anthropic"}, "claude-sonnet-4-5", "Be concise."), cfg)
+	require.Equal(t, Production(
+		Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY"},
+		"claude-sonnet-4-5",
+		"Be concise.",
+	), cfg)
+}
+
+func TestFromAgentConfigMapsAnthropicGateway(t *testing.T) {
+	cfg, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.Anthropic{
+			BaseModel: adk.BaseModel{Model: "claude-custom"},
+			BaseUrl:   "https://gateway.example.com/anthropic",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "kagent-anthropic", cfg.Provider.Name)
+	require.Equal(t, "https://gateway.example.com/anthropic", cfg.Provider.BaseURL)
+	require.Equal(t, "anthropic-messages", cfg.Provider.API)
+	require.Equal(t, "ANTHROPIC_API_KEY", cfg.Provider.APIKeyEnv)
 }
 
 func TestFromAgentConfigRejectsUnsupportedAnthropicTuning(t *testing.T) {
