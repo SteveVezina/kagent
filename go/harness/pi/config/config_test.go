@@ -19,6 +19,51 @@ func TestFromAgentConfigMapsOpenAI(t *testing.T) {
 	}, cfg)
 }
 
+func TestFromAgentConfigMapsOpenAIGateway(t *testing.T) {
+	cfg, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.OpenAI{
+			BaseModel: adk.BaseModel{Model: "gpt-4.1-mini"},
+			BaseUrl:   "http://mock-llm.kagent.svc.cluster.local/v1",
+			APIFormat: "chatCompletions",
+		},
+		Instruction: "Reply briefly.",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, Config{
+		Provider: "kagent-openai",
+		Model: "gpt-4.1-mini",
+		SystemPrompt: "Reply briefly.",
+		BaseURL: "http://mock-llm.kagent.svc.cluster.local/v1",
+		API: "openai-completions",
+	}, cfg)
+}
+
+func TestFromAgentConfigMapsOpenAIResponsesGateway(t *testing.T) {
+	cfg, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.OpenAI{
+			BaseModel: adk.BaseModel{Model: "gpt-5.4"},
+			BaseUrl:   "https://gateway.example.com/v1",
+			APIFormat: "responses",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "openai-responses", cfg.API)
+}
+
+func TestFromAgentConfigRejectsUnknownOpenAIAPIFormat(t *testing.T) {
+	_, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.OpenAI{
+			BaseModel: adk.BaseModel{Model: "gpt-5.4"},
+			BaseUrl:   "https://gateway.example.com/v1",
+			APIFormat: "future-api",
+		},
+	})
+
+	require.ErrorContains(t, err, "OpenAI API format")
+}
+
 func TestFromAgentConfigMapsAnthropic(t *testing.T) {
 	cfg, err := FromAgentConfig(&adk.AgentConfig{
 		Model:       &adk.Anthropic{BaseModel: adk.BaseModel{Model: "claude-sonnet-4-5"}},
@@ -27,17 +72,6 @@ func TestFromAgentConfigMapsAnthropic(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, Config{Provider: "anthropic", Model: "claude-sonnet-4-5", SystemPrompt: "Be concise."}, cfg)
-}
-
-func TestFromAgentConfigRejectsUnsupportedModelConfiguration(t *testing.T) {
-	_, err := FromAgentConfig(&adk.AgentConfig{
-		Model: &adk.OpenAI{
-			BaseModel: adk.BaseModel{Model: "gpt-5.4"},
-			BaseUrl:   "https://gateway.example.com/v1",
-		},
-	})
-
-	require.ErrorContains(t, err, "custom OpenAI base URL")
 }
 
 func TestFromAgentConfigRejectsUnsupportedAgentFeatures(t *testing.T) {
