@@ -101,3 +101,18 @@ func TestEventTranslatorUsesAgentSettledAsTerminalEvent(t *testing.T) {
 	require.True(t, done)
 	require.Nil(t, outcome.Failure)
 }
+
+func TestEventTranslatorReportsAssistantFailureAtSettlement(t *testing.T) {
+	translator := newEventTranslator()
+	sink := &recordingSink{}
+
+	_, done, err := translator.translate([]byte(`{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"rate limited"}}`), sink)
+	require.NoError(t, err)
+	require.False(t, done)
+
+	outcome, done, err := translator.translate([]byte(`{"type":"agent_settled"}`), sink)
+	require.NoError(t, err)
+	require.True(t, done)
+	require.NotNil(t, outcome.Failure)
+	require.Equal(t, "Pi execution failed", outcome.Failure.Message)
+}
