@@ -1,0 +1,79 @@
+// Package config translates the BYO ADK configuration into the subset Pi can
+// execute without silently dropping semantics.
+package config
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/kagent-dev/kagent/go/api/adk"
+)
+
+// Config is the runtime-neutral Pi startup configuration derived from a
+// compiler-owned AgentConfig. Credentials remain in the process environment.
+type Config struct {
+	Provider     string
+	Model        string
+	SystemPrompt string
+}
+
+// FromAgentConfig maps the currently supported BYO AgentConfig subset to Pi.
+func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
+	if agent == nil || agent.Model == nil {
+		return Config{}, fmt.Errorf("Pi model is required")
+	}
+	if len(agent.HttpTools) > 0 || len(agent.SseTools) > 0 || len(agent.StdioTools) > 0 {
+		return Config{}, fmt.Errorf("Pi BYO prototype does not support MCP tools yet")
+	}
+	if len(agent.RemoteAgents) > 0 || len(agent.SubAgents) > 0 {
+		return Config{}, fmt.Errorf("Pi BYO prototype does not support agent tools yet")
+	}
+	if agent.AgentPlugins != nil {
+		return Config{}, fmt.Errorf("Pi BYO prototype does not support Agent Plugin resources yet")
+	}
+	if agent.Memory != nil || agent.ContextConfig != nil {
+		return Config{}, fmt.Errorf("Pi BYO prototype does not support kagent memory or context configuration yet")
+	}
+
+	cfg := Config{SystemPrompt: agent.Instruction}
+	switch model := agent.Model.(type) {
+	case *adk.OpenAI:
+		if err := validateBaseModel(model.BaseModel); err != nil {
+			return Config{}, err
+		}
+		if strings.TrimSpace(model.BaseUrl) != "" {
+			return Config{}, fmt.Errorf("Pi BYO prototype does not support a custom OpenAI base URL yet")
+		}
+		if strings.TrimSpace(model.APIFormat) != "" {
+			return Config{}, fmt.Errorf("Pi BYO prototype does not support an explicit OpenAI API format yet")
+		}
+		cfg.Provider, cfg.Model = "openai", strings.TrimSpace(model.Model)
+	case *adk.Anthropic:
+		if err := validateBaseModel(model.BaseModel); err != nil {
+			return Config{}, err
+		}
+		if strings.TrimSpace(model.BaseUrl) != "" {
+			return Config{}, fmt.Errorf("Pi BYO prototype does not support a custom Anthropic base URL yet")
+		}
+		cfg.Provider, cfg.Model = "anthropic", strings.TrimSpace(model.Model)
+	default:
+		return Config{}, fmt.Errorf("Pi BYO prototype does not support model provider %q yet", agent.Model.GetType())
+	}
+	if cfg.Model == "" {
+		return Config{}, fmt.Errorf("Pi model name is required")
+	}
+	return cfg, nil
+}
+
+func validateBaseModel(model adk.BaseModel) error {
+	if model.APIKeyPassthrough {
+		return fmt.Errorf("Pi BYO prototype does not support API key passthrough yet")
+	}
+	if len(model.Headers) > 0 {
+		return fmt.Errorf("Pi BYO prototype does not support custom model headers yet")
+	}
+	if model.TLSInsecureSkipVerify != nil || model.TLSCACertPath != nil || model.TLSDisableSystemCAs != nil {
+		return fmt.Errorf("Pi BYO prototype does not support custom model TLS configuration yet")
+	}
+	return nil
+}
