@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPinnedPiVersionMatchesPublishedPackage(t *testing.T) {
+	require.Equal(t, "0.85.0", PinnedPiVersion)
+}
+
 func TestProductionUsesPinnedRuntimeDefaults(t *testing.T) {
 	provider := Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions"}
 	cfg := Production(provider, "gpt-5.4", "help")
@@ -38,7 +42,7 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 	_, err := Parse([]byte(`{
 		"version":1,
 		"pi_executable":"pi",
-		"expected_pi_version":"0.85.1",
+		"expected_pi_version":"0.85.0",
 		"strict_version":true,
 		"model":"gpt-5.4",
 		"provider":{"name":"kagent-openai","base_url":"https://api.openai.com/v1","api":"openai-completions"},
