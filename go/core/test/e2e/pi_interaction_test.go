@@ -1,54 +1,97 @@
 package e2e_test
 
 import (
+	"context"
+	"embed"
 	"strings"
 	"testing"
 
 	a2atype "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TestPiBYOAgentInteraction verifies the same public interaction path exercised
-// by the built-in Harness adapters while running the real Pi binary behind the
-// existing BYO compiler/runtime contract. The second turn verifies native Pi
-// session continuation across Actor suspension and wakeup.
-func TestPiBYOAgentInteraction(t *testing.T) {
-	target := interactionTarget(t)
-	template := createPiInteractionTemplate(t, startInteractionMock(t))
-	fixture := newInteractionFixtureForHarnessTemplate(t, target, "pi-e2e", template)
+const piE2EHarness = "pi-e2e"
 
-	for turn := range 2 {
-		_, _, task := fixture.send(t, "What is 2+2?")
-		if task.Status.State != a2atype.TaskStateCompleted {
-			t.Fatalf("Pi A2A task %d state = %s, want COMPLETED", turn+1, task.Status.State)
-		}
-		if text := taskText(task); !strings.Contains(text, "The answer is 4.") {
-			t.Fatalf("Pi A2A response text = %q, want mock LLM response", text)
-		}
+//go:embed mocks/invoke_pi_agent.json
+var piInteractionMocks embed.FS
+
+// TestE2EPiMockInteractionResume verifies the same public interaction and
+// continuation path exercised by the native Codex and Claude Harness adapters,
+// while Pi is selected through the existing BYO Harness type during the
+// prototype phase.
+func TestE2EPiMockInteractionResume(t *testing.T) {
+	target := interactionTarget(t)
+	modelURL := reachableModelURL(t, startMockLLMServer(t, piInteractionMocks, "mocks/invoke_pi_agent.json"))
+	template := createPiMockTemplate(t, modelURL)
+	fixture := newInteractionFixtureForHarnessTemplate(t, target, piE2EHarness, template)
+
+	_, _, first := fixture.send(t, "Return exactly PI_MOCK_FIRST.")
+	if first.Status.State != a2atype.TaskStateCompleted || !strings.Contains(taskText(first), "PI_MOCK_FIRST") {
+		t.Fatalf("first Pi task state = %s, text = %q, want completed PI_MOCK_FIRST", first.Status.State, taskText(first))
+	}
+
+	_, _, resumed := fixture.send(t, "Return exactly PI_MOCK_SECOND.")
+	if resumed.Status.State != a2atype.TaskStateCompleted || !strings.Contains(taskText(resumed), "PI_MOCK_SECOND") {
+		t.Fatalf("resumed Pi task state = %s, text = %q, want completed PI_MOCK_SECOND", resumed.Status.State, taskText(resumed))
 	}
 }
 
-func createPiInteractionTemplate(t *testing.T, modelURL string) string {
+func createPiMockTemplate(t *testing.T, baseURL string) string {
 	t.Helper()
 	kube := interactionKubeClient(t)
-	model := createInteractionModel(t, kube, modelURL, nil)
+	model := createPiMockModel(t, kube, baseURL)
 	template := &v1alpha3.AgentTemplate{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "pi-interaction-",
-			Namespace:    "kagent",
-			Labels: map[string]string{
-				"kagent.dev/e2e-runtime": "pi",
-				"kagent.dev/harness":     "pi-e2e",
-			},
+			GenerateName: "pi-interaction-", Namespace: "kagent",
+			Labels: map[string]string{"kagent.dev/e2e-runtime": "pi"},
 		},
 		Spec: v1alpha3.AgentTemplateSpec{
 			ModelConfig:  &corev1.LocalObjectReference{Name: model.Name},
-			Description:  "Pi Harness interaction E2E fixture",
-			SystemPrompt: "Reply briefly.",
+			Description:  "Pi mockLLM interaction fixture",
+			SystemPrompt: "Reply concisely and follow the requested output format exactly.",
 		},
 	}
-	createAndWaitInteractionTemplate(t, kube, template)
+	createAndWaitInteractionTemplateForHarness(t, kube, template, piE2EHarness)
 	return template.Name
+}
+
+func createPiMockModel(t *testing.T, kube ctrlclient.Client, baseURL string) *v1alpha3.ModelConfig {
+	t.Helper()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "pi-mock-", Namespace: "kagent"},
+		Data:       map[string][]byte{"OPENAI_API_KEY": []byte("mock-key")},
+	}
+	if err := kube.Create(t.Context(), secret); err != nil {
+		t.Fatalf("create Pi mock Secret: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := kube.Delete(context.Background(), secret); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete Pi mock Secret: %v", err)
+		}
+	})
+
+	chatCompletions := v1alpha3.OpenAIAPIFormatChatCompletions
+	model := &v1alpha3.ModelConfig{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "pi-mock-", Namespace: "kagent"},
+		Spec: v1alpha3.ModelConfigSpec{
+			Provider:     v1alpha3.ModelProviderOpenAI,
+			Model:        "gpt-4.1-mini",
+			APIKeySecret: secret.Name,
+			APIKeySecretKey: "OPENAI_API_KEY",
+			OpenAI: &v1alpha3.OpenAIConfig{BaseURL: baseURL, APIFormat: &chatCompletions},
+		},
+	}
+	if err := kube.Create(t.Context(), model); err != nil {
+		t.Fatalf("create Pi mock ModelConfig: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := kube.Delete(context.Background(), model); err != nil && !apierrors.IsNotFound(err) {
+			t.Errorf("delete Pi mock ModelConfig: %v", err)
+		}
+	})
+	return model
 }
