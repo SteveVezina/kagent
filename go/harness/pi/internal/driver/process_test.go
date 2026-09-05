@@ -35,7 +35,7 @@ func TestProcessDriverRunsRPCProtocol(t *testing.T) {
 	argsCapture := filepath.Join(directory, "args.txt")
 	script := `#!/bin/sh
 if [ "$1" = "--version" ]; then
-  echo "0.85.0"
+  echo "0.85.1"
   exit 0
 fi
 printf '%s\n' "$*" >> "$ARGS_CAPTURE"
@@ -61,7 +61,7 @@ sleep 5
 		t.Fatal(err)
 	}
 	driver := NewProcessDriver(ProcessConfig{
-		Executable: executable, ExpectedVersion: "0.85.0", StrictVersion: true,
+		Executable: executable, ExpectedVersion: "0.85.1", StrictVersion: true,
 		Workspace: workspace, SessionDir: sessions, Provider: "openai", Model: "gpt-5.4",
 		SystemPrompt: "help", Environment: append(os.Environ(), "CAPTURE="+capture, "ARGS_CAPTURE="+argsCapture),
 		MaxLineBytes: 4096, MaxStderrBytes: 1024, InterruptGrace: 100 * time.Millisecond,
@@ -91,7 +91,7 @@ sleep 5
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"--mode rpc", "--provider openai", "--model gpt-5.4", "--system-prompt help", "--no-approve", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"} {
+	for _, fragment := range []string{"--mode rpc", "--offline", "--provider openai", "--model gpt-5.4", "--system-prompt help", "--no-approve", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"} {
 		if !bytes.Contains(args, []byte(fragment)) {
 			t.Errorf("Pi args omit %q:\n%s", fragment, args)
 		}
