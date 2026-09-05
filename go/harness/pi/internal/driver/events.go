@@ -8,7 +8,8 @@ import (
 )
 
 type eventTranslator struct {
-	tools map[string]string
+	tools   map[string]string
+	failure *runtime.Failure
 }
 
 func newEventTranslator() *eventTranslator {
@@ -37,6 +38,28 @@ func (t *eventTranslator) translate(raw []byte, sink runtime.EventSink) (runtime
 			return runtime.Outcome{}, false, nil
 		}
 		return runtime.Outcome{}, false, sink.TextDelta(runtime.TextDelta{Text: event.AssistantMessageEvent.Delta})
+	case "message_end":
+		var event struct {
+			Message struct {
+				Role       string `json:"role"`
+				StopReason string `json:"stopReason"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(raw, &event); err != nil {
+			return runtime.Outcome{}, false, fmt.Errorf("decode Pi message end: %w", err)
+		}
+		if event.Message.Role != "assistant" {
+			return runtime.Outcome{}, false, nil
+		}
+		switch event.Message.StopReason {
+		case "error":
+			t.failure = &runtime.Failure{Message: "Pi execution failed"}
+		case "aborted":
+			t.failure = &runtime.Failure{Message: "Pi execution was aborted"}
+		default:
+			t.failure = nil
+		}
+		return runtime.Outcome{}, false, nil
 	case "tool_execution_start":
 		var event struct {
 			ToolCallID string         `json:"toolCallId"`
@@ -74,7 +97,7 @@ func (t *eventTranslator) translate(raw []byte, sink runtime.EventSink) (runtime
 		delete(t.tools, event.ToolCallID)
 		return runtime.Outcome{}, false, sink.ToolResult(runtime.ToolResult{ID: event.ToolCallID, Name: event.ToolName, Result: event.Result, IsError: event.IsError})
 	case "agent_settled":
-		return runtime.Outcome{}, true, nil
+		return runtime.Outcome{Failure: t.failure}, true, nil
 	default:
 		return runtime.Outcome{}, false, nil
 	}
