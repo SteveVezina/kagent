@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	PinnedPiVersion     = "0.85.1"
+	PinnedPiVersion      = "0.85.1"
 	defaultOpenAIBaseURL = "https://api.openai.com/v1"
 )
 
