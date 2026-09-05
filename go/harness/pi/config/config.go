@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	Version              = 1
-	PinnedPiVersion      = "0.85.0"
-	defaultOpenAIBaseURL = "https://api.openai.com/v1"
+	Version                 = 1
+	PinnedPiVersion         = "0.85.0"
+	defaultOpenAIBaseURL    = "https://api.openai.com/v1"
+	defaultAnthropicBaseURL = "https://api.anthropic.com"
 )
 
 // Config is the versioned, runtime-neutral Pi startup configuration.
@@ -36,12 +37,13 @@ type Config struct {
 	InterruptGraceMillis int      `json:"interrupt_grace_millis"`
 }
 
-// Provider contains only the native Pi provider settings kagent currently
-// supports without silently dropping ModelConfig semantics.
+// Provider contains the compiler-owned Pi provider settings required to
+// preserve kagent ModelConfig semantics without persisting credential values.
 type Provider struct {
-	Name    string `json:"name"`
-	BaseURL string `json:"base_url,omitempty"`
-	API     string `json:"api,omitempty"`
+	Name      string `json:"name"`
+	BaseURL   string `json:"base_url"`
+	API       string `json:"api"`
+	APIKeyEnv string `json:"api_key_env"`
 }
 
 // Production returns the pinned runtime defaults used by normal Actor launches.
@@ -87,17 +89,23 @@ func (c Config) Validate() error {
 	if c.MaxFrameBytes <= 0 || c.MaxStderrBytes <= 0 || c.InterruptGraceMillis <= 0 {
 		return fmt.Errorf("frame, stderr, and interrupt grace limits must be positive")
 	}
+	if err := validateHTTPURL(c.Provider.BaseURL); err != nil {
+		return fmt.Errorf("invalid %s provider base URL: %w", c.Provider.Name, err)
+	}
 	switch c.Provider.Name {
 	case "kagent-openai":
-		if err := validateHTTPURL(c.Provider.BaseURL); err != nil {
-			return fmt.Errorf("invalid OpenAI provider base URL: %w", err)
-		}
 		if c.Provider.API != "openai-completions" && c.Provider.API != "openai-responses" {
 			return fmt.Errorf("unsupported Pi OpenAI API %q", c.Provider.API)
 		}
-	case "anthropic":
-		if c.Provider.BaseURL != "" || c.Provider.API != "" {
-			return fmt.Errorf("Pi Anthropic provider does not support base URL or API overrides yet")
+		if c.Provider.APIKeyEnv != "OPENAI_API_KEY" {
+			return fmt.Errorf("kagent-openai must use OPENAI_API_KEY")
+		}
+	case "kagent-anthropic":
+		if c.Provider.API != "anthropic-messages" {
+			return fmt.Errorf("unsupported Pi Anthropic API %q", c.Provider.API)
+		}
+		if c.Provider.APIKeyEnv != "ANTHROPIC_API_KEY" {
+			return fmt.Errorf("kagent-anthropic must use ANTHROPIC_API_KEY")
 		}
 	default:
 		return fmt.Errorf("unsupported Pi provider %q", c.Provider.Name)
@@ -145,7 +153,7 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 		if err := validateHTTPURL(baseURL); err != nil {
 			return Config{}, fmt.Errorf("OpenAI base URL: %w", err)
 		}
-		provider := Provider{Name: "kagent-openai", BaseURL: baseURL}
+		provider := Provider{Name: "kagent-openai", BaseURL: baseURL, APIKeyEnv: "OPENAI_API_KEY"}
 		switch strings.TrimSpace(model.APIFormat) {
 		case "", "chatCompletions":
 			provider.API = "openai-completions"
@@ -162,10 +170,16 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 		if err := validateAnthropicTuning(model); err != nil {
 			return Config{}, err
 		}
-		if strings.TrimSpace(model.BaseUrl) != "" {
-			return Config{}, fmt.Errorf("Pi BYO prototype does not support a custom Anthropic base URL yet")
+		baseURL := strings.TrimSpace(model.BaseUrl)
+		if baseURL == "" {
+			baseURL = defaultAnthropicBaseURL
 		}
-		cfg = Production(Provider{Name: "anthropic"}, strings.TrimSpace(model.Model), agent.Instruction)
+		if err := validateHTTPURL(baseURL); err != nil {
+			return Config{}, fmt.Errorf("Anthropic base URL: %w", err)
+		}
+		cfg = Production(Provider{
+			Name: "kagent-anthropic", BaseURL: baseURL, API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY",
+		}, strings.TrimSpace(model.Model), agent.Instruction)
 	default:
 		return Config{}, fmt.Errorf("Pi BYO prototype does not support model provider %q yet", agent.Model.GetType())
 	}
