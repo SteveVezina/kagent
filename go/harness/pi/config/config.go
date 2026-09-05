@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/kagent-dev/kagent/go/api/adk"
@@ -17,6 +18,8 @@ type Config struct {
 	Provider     string
 	Model        string
 	SystemPrompt string
+	BaseURL      string
+	API          string
 }
 
 // FromAgentConfig maps the currently supported BYO AgentConfig subset to Pi.
@@ -43,13 +46,24 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 		if err := validateBaseModel(model.BaseModel); err != nil {
 			return Config{}, err
 		}
-		if strings.TrimSpace(model.BaseUrl) != "" {
-			return Config{}, fmt.Errorf("Pi BYO prototype does not support a custom OpenAI base URL yet")
-		}
-		if strings.TrimSpace(model.APIFormat) != "" {
-			return Config{}, fmt.Errorf("Pi BYO prototype does not support an explicit OpenAI API format yet")
-		}
 		cfg.Provider, cfg.Model = "openai", strings.TrimSpace(model.Model)
+		cfg.BaseURL = strings.TrimSpace(model.BaseUrl)
+		if cfg.BaseURL != "" {
+			if err := validateHTTPURL(cfg.BaseURL); err != nil {
+				return Config{}, fmt.Errorf("OpenAI base URL: %w", err)
+			}
+			cfg.Provider = "kagent-openai"
+			switch strings.TrimSpace(model.APIFormat) {
+			case "", "chatCompletions":
+				cfg.API = "openai-completions"
+			case "responses":
+				cfg.API = "openai-responses"
+			default:
+				return Config{}, fmt.Errorf("Pi BYO prototype does not support OpenAI API format %q", model.APIFormat)
+			}
+		} else if strings.TrimSpace(model.APIFormat) != "" && strings.TrimSpace(model.APIFormat) != "chatCompletions" && strings.TrimSpace(model.APIFormat) != "responses" {
+			return Config{}, fmt.Errorf("Pi BYO prototype does not support OpenAI API format %q", model.APIFormat)
+		}
 	case *adk.Anthropic:
 		if err := validateBaseModel(model.BaseModel); err != nil {
 			return Config{}, err
@@ -65,6 +79,17 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 		return Config{}, fmt.Errorf("Pi model name is required")
 	}
 	return cfg, nil
+}
+
+func validateHTTPURL(value string) error {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return err
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("must be an absolute HTTP(S) URL")
+	}
+	return nil
 }
 
 func validateBaseModel(model adk.BaseModel) error {
