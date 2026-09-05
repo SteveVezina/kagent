@@ -20,13 +20,14 @@ RUN --mount=type=cache,target=/root/go/pkg/mod,rw \
     go build -trimpath -o /kagent-pi ./harness/pi/cmd
 
 FROM node:24-alpine3.22
-ARG PI_CODING_AGENT_VERSION=0.85.1
+ARG PI_CODING_AGENT_VERSION=0.85.0
 ARG VERSION
 
 RUN apk add --no-cache bash ca-certificates git \
     && npm install -g --ignore-scripts --omit=dev --no-audit --no-fund \
         "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}" \
     && test "$(pi --version)" = "${PI_CODING_AGENT_VERSION}" \
+    && pi --help >/dev/null \
     && addgroup -S -g 65532 kagent \
     && adduser -S -D -H -u 65532 -G kagent -h /data -s /sbin/nologin kagent \
     && mkdir -p /data/adapter /data/pi /data/workspace \
