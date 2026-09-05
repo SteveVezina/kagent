@@ -1,6 +1,9 @@
 package driver
 
 import (
+	"bufio"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kagent-dev/kagent/go/harness/runtime"
@@ -130,4 +133,51 @@ func TestEventTranslatorClearsRetriedAssistantFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Nil(t, outcome.Failure)
+}
+
+func TestEventTranslatorCheckedInTranscripts(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		outcome, sink := replayTranscript(t, "rpc-success.jsonl")
+		require.Nil(t, outcome.Failure)
+		require.Equal(t, []runtime.TextDelta{{Text: "hello"}}, sink.text)
+	})
+
+	t.Run("failure", func(t *testing.T) {
+		outcome, _ := replayTranscript(t, "rpc-failure.jsonl")
+		require.NotNil(t, outcome.Failure)
+		require.Equal(t, "Pi execution failed", outcome.Failure.Message)
+	})
+
+	t.Run("tools", func(t *testing.T) {
+		outcome, sink := replayTranscript(t, "rpc-tools.jsonl")
+		require.Nil(t, outcome.Failure)
+		require.Len(t, sink.toolCalls, 1)
+		require.Len(t, sink.toolResults, 1)
+		require.Equal(t, "call-1", sink.toolCalls[0].ID)
+		require.Equal(t, "call-1", sink.toolResults[0].ID)
+	})
+}
+
+func replayTranscript(t *testing.T, name string) (runtime.Outcome, *recordingSink) {
+	t.Helper()
+	file, err := os.Open(filepath.Join("..", "..", "testdata", name))
+	require.NoError(t, err)
+	defer file.Close()
+
+	translator := newEventTranslator()
+	sink := &recordingSink{}
+	var outcome runtime.Outcome
+	terminalEvents := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		translated, done, err := translator.translate(scanner.Bytes(), sink)
+		require.NoError(t, err)
+		if done {
+			outcome = translated
+			terminalEvents++
+		}
+	}
+	require.NoError(t, scanner.Err())
+	require.Equal(t, 1, terminalEvents)
+	return outcome, sink
 }
