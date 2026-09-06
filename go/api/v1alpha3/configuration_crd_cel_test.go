@@ -57,7 +57,7 @@ func TestConfigurationCRDValidation(t *testing.T) {
 		{
 			name:       "Harness requires one runtime",
 			object:     validHarness(namespace, "harness-no-runtime", HarnessSpec{}),
-			wantReject: "exactly one of kagent, codex, claude, or byo must be specified",
+			wantReject: "exactly one of kagent, codex, claude, pi, or byo must be specified",
 		},
 		{
 			name: "Harness rejects multiple runtimes",
@@ -65,7 +65,21 @@ func TestConfigurationCRDValidation(t *testing.T) {
 				Kagent: &KagentHarness{},
 				Codex:  &CodexHarness{},
 			}),
-			wantReject: "exactly one of kagent, codex, claude, or byo must be specified",
+			wantReject: "exactly one of kagent, codex, claude, pi, or byo must be specified",
+		},
+		{
+			name: "Harness rejects Pi with another runtime",
+			object: validHarness(namespace, "harness-pi-codex", HarnessSpec{
+				Pi:    &PiHarness{},
+				Codex: &CodexHarness{},
+			}),
+			wantReject: "exactly one of kagent, codex, claude, pi, or byo must be specified",
+		},
+		{
+			name: "valid Pi Harness",
+			object: validHarness(namespace, "valid-pi-harness", HarnessSpec{
+				Pi: &PiHarness{},
+			}),
 		},
 		{
 			name: "Harness rejects tag-only image",
