@@ -128,7 +128,7 @@ func (c *Compiler) compileMCPHeaders(ctx context.Context, namespace string, refs
 			}
 			sum := sha256.Sum256([]byte(namespace + "\x00" + ref.ValueFrom.Name + "\x00" + ref.ValueFrom.Key))
 			name := mcpCredentialPrefix + strings.ToUpper(fmt.Sprintf("%x", sum[:8]))
-			headers[ref.Name] = "${" + name + "}"
+			headers[ref.Name] = "__KAGENT_ENV[" + name + "]__"
 			environment = append(environment, secretEnvironment(name, ref.ValueFrom.Name, ref.ValueFrom.Key))
 		default:
 			return nil, nil, v2translator.NewValidationError("unsupported MCP header value source %q", ref.ValueFrom.Type)
