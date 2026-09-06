@@ -21,17 +21,9 @@ import (
 )
 
 const (
-	openAIAPIKeyEnv     = "OPENAI_API_KEY"
-	anthropicAPIKeyEnv  = "ANTHROPIC_API_KEY"
-	mcpCredentialPrefix = "KAGENT_PI_MCP_CREDENTIAL_"
-	openAIBaseURL       = "https://api.openai.com/v1"
-	anthropicBaseURL    = "https://api.anthropic.com"
+	openAIBaseURL    = "https://api.openai.com/v1"
+	anthropicBaseURL = "https://api.anthropic.com"
 )
-
-var ownedEnvironment = map[string]struct{}{
-	openAIAPIKeyEnv:    {},
-	anthropicAPIKeyEnv: {},
-}
 
 type Compiler struct {
 	ctx         krt.HandlerContext
@@ -74,8 +66,8 @@ func (c *Compiler) Compile(ctx context.Context, input *v2translator.HarnessInput
 	environment := append([]corev1.EnvVar(nil), providerEnvironment...)
 	environment = append(environment, mcp.environment...)
 	for _, variable := range input.Harness.Spec.Env {
-		if _, reserved := ownedEnvironment[variable.Name]; reserved || strings.HasPrefix(variable.Name, mcpCredentialPrefix) {
-			return nil, v2translator.NewValidationError("Harness env %q conflicts with Pi compiled configuration", variable.Name)
+		if piconfig.OwnsEnvironment(variable.Name) {
+			return nil, v2translator.NewValidationError("Harness env %q conflicts with Pi-owned runtime configuration", variable.Name)
 		}
 		envVar := corev1.EnvVar{Name: variable.Name}
 		if variable.Value != nil {
@@ -160,8 +152,10 @@ func (c *Compiler) compileProvider(ctx context.Context, model *v1alpha3.ModelCon
 		if err != nil {
 			return piconfig.Provider{}, nil, nil, v2translator.NewValidationError("Pi OpenAI baseUrl %v", err)
 		}
-		return piconfig.Provider{Name: "kagent-openai", BaseURL: baseURL, API: api, APIKeyEnv: openAIAPIKeyEnv}, []corev1.EnvVar{
-			secretEnvironment(openAIAPIKeyEnv, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey),
+		return piconfig.Provider{
+			Name: "kagent-openai", BaseURL: baseURL, API: api, APIKeyEnv: piconfig.OpenAIAPIKeyEnvName,
+		}, []corev1.EnvVar{
+			secretEnvironment(piconfig.OpenAIAPIKeyEnvName, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey),
 		}, []string{host}, nil
 
 	case v1alpha3.ModelProviderAnthropic:
@@ -184,8 +178,10 @@ func (c *Compiler) compileProvider(ctx context.Context, model *v1alpha3.ModelCon
 		if err != nil {
 			return piconfig.Provider{}, nil, nil, v2translator.NewValidationError("Pi Anthropic baseUrl %v", err)
 		}
-		return piconfig.Provider{Name: "kagent-anthropic", BaseURL: baseURL, API: "anthropic-messages", APIKeyEnv: anthropicAPIKeyEnv}, []corev1.EnvVar{
-			secretEnvironment(anthropicAPIKeyEnv, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey),
+		return piconfig.Provider{
+			Name: "kagent-anthropic", BaseURL: baseURL, API: "anthropic-messages", APIKeyEnv: piconfig.AnthropicAPIKeyEnvName,
+		}, []corev1.EnvVar{
+			secretEnvironment(piconfig.AnthropicAPIKeyEnvName, model.Spec.APIKeySecret, model.Spec.APIKeySecretKey),
 		}, []string{host}, nil
 
 	default:
@@ -240,38 +236,63 @@ type provenanceEntry struct {
 }
 
 func (c *Compiler) buildProvenance(ctx context.Context, input *v2translator.HarnessInput, environment []corev1.EnvVar, configJSON, cardJSON []byte) ([]byte, error) {
-	entries := []provenanceEntry{
-		objectProvenance(v1alpha3.GroupVersion.String(), "Harness", input.Harness.Name, input.Harness.UID, input.Harness.Generation, input.Harness.Spec),
+	entries := []provenanceEntry{objectProvenance(v1alpha3.GroupVersion.String(), "Harness", input.Harness.Name, input.Harness.UID, input.Harness.Generation, input.Harness.Spec)}
+	entries = append(entries,
 		objectProvenance("kagent.internal/v1", "GeneratedInput", "config.json", "", 0, json.RawMessage(configJSON)),
 		objectProvenance("kagent.internal/v1", "GeneratedInput", "agent-card.json", "", 0, json.RawMessage(cardJSON)),
-		objectProvenance(v1alpha3.GroupVersion.String(), "AgentTemplate", input.Root.Template.Name, input.Root.Template.UID, input.Root.Template.Generation, input.Root.Template.Spec),
-		objectProvenance(v1alpha3.GroupVersion.String(), "ModelConfig", input.Root.ResolvedModelConfig.Config.Name, input.Root.ResolvedModelConfig.Config.UID, input.Root.ResolvedModelConfig.Config.Generation, input.Root.ResolvedModelConfig.Config.Spec),
-	}
-
+	)
+	seenObjects := map[string]struct{}{}
 	configMaps := map[string]struct{}{}
-	if input.Root.Template.Spec.SystemPromptFrom != nil {
-		configMaps[input.Root.Template.Spec.SystemPromptFrom.Name] = struct{}{}
-	}
-	if input.Root.Template.Spec.PromptTemplate != nil {
-		for _, source := range input.Root.Template.Spec.PromptTemplate.DataSources {
-			configMaps[source.Name] = struct{}{}
+	var addAgent func(*v2translator.AgentInput)
+	addAgent = func(agent *v2translator.AgentInput) {
+		if agent == nil || agent.Template == nil || agent.ResolvedModelConfig == nil || agent.ResolvedModelConfig.Config == nil {
+			return
 		}
-	}
-	seenMCP := map[string]struct{}{}
-	for _, tool := range input.Root.MCPTools {
-		if tool.Server == nil {
-			continue
-		}
-		if _, seen := seenMCP[tool.Server.Name]; !seen {
-			seenMCP[tool.Server.Name] = struct{}{}
-			entries = append(entries, objectProvenance(v1alpha3.GroupVersion.String(), "RemoteMCPServer", tool.Server.Name, tool.Server.UID, tool.Server.Generation, tool.Server.Spec))
-		}
-		for _, header := range tool.Server.Spec.HeadersFrom {
-			if header.ValueFrom != nil && header.ValueFrom.Type == v1alpha3.ConfigMapValueSource {
-				configMaps[header.ValueFrom.Name] = struct{}{}
+		model := agent.ResolvedModelConfig.Config
+		for _, object := range []struct {
+			kind, name string
+			uid        types.UID
+			generation int64
+			value      any
+		}{
+			{"AgentTemplate", agent.Template.Name, agent.Template.UID, agent.Template.Generation, agent.Template.Spec},
+			{"ModelConfig", model.Name, model.UID, model.Generation, model.Spec},
+		} {
+			identity := object.kind + "\x00" + object.name
+			if _, exists := seenObjects[identity]; !exists {
+				seenObjects[identity] = struct{}{}
+				entries = append(entries, objectProvenance(v1alpha3.GroupVersion.String(), object.kind, object.name, object.uid, object.generation, object.value))
 			}
+		}
+		if agent.Template.Spec.SystemPromptFrom != nil {
+			configMaps[agent.Template.Spec.SystemPromptFrom.Name] = struct{}{}
+		}
+		if agent.Template.Spec.PromptTemplate != nil {
+			for _, source := range agent.Template.Spec.PromptTemplate.DataSources {
+				configMaps[source.Name] = struct{}{}
+			}
+		}
+		for _, tool := range agent.MCPTools {
+			if tool.Server == nil {
+				continue
+			}
+			identity := "RemoteMCPServer\x00" + tool.Server.Name
+			if _, exists := seenObjects[identity]; !exists {
+				seenObjects[identity] = struct{}{}
+				entries = append(entries, objectProvenance(v1alpha3.GroupVersion.String(), "RemoteMCPServer", tool.Server.Name, tool.Server.UID, tool.Server.Generation, tool.Server.Spec))
+			}
+			for _, header := range tool.Server.Spec.HeadersFrom {
+				if header.ValueFrom != nil && header.ValueFrom.Type == v1alpha3.ConfigMapValueSource {
+					configMaps[header.ValueFrom.Name] = struct{}{}
+				}
+			}
+		}
+		for _, child := range agent.Shared {
+			addAgent(child.Agent)
+		}
 	}
-	}
+	addAgent(input.Root)
+
 	for name := range configMaps {
 		configMap := krt.FetchOne(c.ctx, c.collections.ConfigMaps, krt.FilterObjectName(types.NamespacedName{Namespace: input.Harness.Namespace, Name: name}))
 		if configMap == nil {
@@ -287,7 +308,7 @@ func (c *Compiler) buildProvenance(ctx context.Context, input *v2translator.Harn
 		}
 		ref := variable.ValueFrom.SecretKeyRef
 		identity := ref.Name + "\x00" + ref.Key
-		if _, seen := seenSecrets[identity]; seen {
+		if _, exists := seenSecrets[identity]; exists {
 			continue
 		}
 		seenSecrets[identity] = struct{}{}
@@ -341,7 +362,7 @@ func agentTemplateCard(template *v1alpha3.AgentTemplate) *a2atype.AgentCard {
 	return &a2atype.AgentCard{
 		Name: strings.ReplaceAll(template.Name, "-", "_"), Description: template.Spec.Description, Version: "v1",
 		SupportedInterfaces: []*a2atype.AgentInterface{{URL: "http://127.0.0.1:80", ProtocolBinding: a2atype.TransportProtocolGRPC, ProtocolVersion: a2atype.Version}},
-		Capabilities: a2atype.AgentCapabilities{Streaming: true}, Skills: []a2atype.AgentSkill{},
+		Capabilities:        a2atype.AgentCapabilities{Streaming: true}, Skills: []a2atype.AgentSkill{},
 		DefaultInputModes: []string{"text"}, DefaultOutputModes: []string{"text"},
 	}
 }
