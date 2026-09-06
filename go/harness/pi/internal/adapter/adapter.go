@@ -1,4 +1,4 @@
-// Package adapter validates BYO compiler output and materializes compiler-owned Pi state.
+// Package adapter validates native compiler output and materializes compiler-owned Pi state.
 package adapter
 
 import (
@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kagent-dev/kagent/go/api/adk"
 	"github.com/kagent-dev/kagent/go/api/agentplugin"
 	"github.com/kagent-dev/kagent/go/core/pkg/agentplugins"
 	"github.com/kagent-dev/kagent/go/harness/internal/utils"
@@ -32,20 +31,15 @@ type Input struct {
 	Environment []string
 }
 
-// New validates the supported BYO config subset, prepares private Pi state,
-// materializes compiler-owned native Pi configuration, and constructs the RPC
-// process driver.
+// New validates the native Pi config, prepares private Pi state, materializes
+// compiler-owned resources, and constructs the RPC process driver.
 func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var agent adk.AgentConfig
-	if err := json.Unmarshal(input.ConfigJSON, &agent); err != nil {
-		return nil, fmt.Errorf("decode BYO agent config: %w", err)
-	}
-	cfg, err := config.FromAgentConfig(&agent)
+	cfg, err := config.Parse(input.ConfigJSON)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode native Pi config: %w", err)
 	}
 	if !filepath.IsAbs(input.Workspace) || !filepath.IsAbs(input.DurableDir) {
 		return nil, fmt.Errorf("workspace and durable directories must be absolute paths")
@@ -80,7 +74,7 @@ func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
 			return nil, fmt.Errorf("inspect Pi Agent Plugin MCP configuration: %w", err)
 		}
 		if len(pluginMCP.StreamableHTTP) != 0 || len(pluginMCP.SSE) != 0 || len(pluginMCP.Stdio) != 0 {
-			return nil, fmt.Errorf("Pi BYO prototype does not support Agent Plugin MCP servers yet")
+			return nil, fmt.Errorf("Pi does not support Agent Plugin MCP servers yet")
 		}
 		if hasSelectedSkills(*cfg.SkillResources) {
 			skillPaths = []string{materialization.SkillsDirectory}
