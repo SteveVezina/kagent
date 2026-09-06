@@ -24,7 +24,8 @@ func TestParseRoundTripsMCPAndSkills(t *testing.T) {
 		Headers: map[string]string{
 			"Authorization": "__KAGENT_ENV[KAGENT_CREDENTIAL_0123ABCD]__",
 		},
-		EnabledTools: []string{"lookup", "search"},
+		EnabledTools:   []string{"lookup", "search"},
+		TimeoutSeconds: 30,
 	}}
 
 	raw, err := json.Marshal(cfg)
@@ -35,6 +36,8 @@ func TestParseRoundTripsMCPAndSkills(t *testing.T) {
 }
 
 func TestFromAgentConfigMapsStreamableHTTPMCP(t *testing.T) {
+	timeout := 30.0
+	terminate := true
 	cfg, err := FromAgentConfig(&adk.AgentConfig{
 		Model: &adk.OpenAI{BaseModel: adk.BaseModel{Model: "gpt-5.4"}},
 		HttpTools: []adk.HttpMcpServerConfig{{
@@ -43,6 +46,8 @@ func TestFromAgentConfigMapsStreamableHTTPMCP(t *testing.T) {
 				Headers: map[string]string{
 					"Authorization": "__KAGENT_ENV[KAGENT_CREDENTIAL_0123ABCD]__",
 				},
+				Timeout:          &timeout,
+				TerminateOnClose: &terminate,
 			},
 			Tools: []string{"search", "lookup", "search"},
 		}},
@@ -54,8 +59,22 @@ func TestFromAgentConfigMapsStreamableHTTPMCP(t *testing.T) {
 		Headers: map[string]string{
 			"Authorization": "__KAGENT_ENV[KAGENT_CREDENTIAL_0123ABCD]__",
 		},
-		EnabledTools: []string{"lookup", "search"},
+		EnabledTools:   []string{"lookup", "search"},
+		TimeoutSeconds: 30,
 	}}, cfg.MCPServers)
+}
+
+func TestFromAgentConfigMapsCustomMCPTimeout(t *testing.T) {
+	timeout := 12.5
+	cfg, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.OpenAI{BaseModel: adk.BaseModel{Model: "gpt-5.4"}},
+		HttpTools: []adk.HttpMcpServerConfig{{
+			Params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp", Timeout: &timeout},
+		}},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 12.5, cfg.MCPServers[0].TimeoutSeconds)
 }
 
 func TestFromAgentConfigMapsSkillResources(t *testing.T) {
@@ -94,7 +113,7 @@ func TestFromAgentConfigRejectsMCPApproval(t *testing.T) {
 	_, err := FromAgentConfig(&adk.AgentConfig{
 		Model: &adk.OpenAI{BaseModel: adk.BaseModel{Model: "gpt-5.4"}},
 		HttpTools: []adk.HttpMcpServerConfig{{
-			Params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp"},
+			Params:          adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp"},
 			RequireApproval: []string{"deploy"},
 		}},
 	})
@@ -102,7 +121,7 @@ func TestFromAgentConfigRejectsMCPApproval(t *testing.T) {
 	require.ErrorContains(t, err, "approval")
 }
 
-func TestFromAgentConfigRejectsMCPRuntimeOverrides(t *testing.T) {
+func TestFromAgentConfigRejectsUnsupportedMCPRuntimeOverrides(t *testing.T) {
 	timeout := 10.0
 	insecure := true
 	terminate := false
@@ -110,9 +129,8 @@ func TestFromAgentConfigRejectsMCPRuntimeOverrides(t *testing.T) {
 		name   string
 		params adk.StreamableHTTPConnectionParams
 	}{
-		{name: "timeout", params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp", Timeout: &timeout}},
 		{name: "sse read timeout", params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp", SseReadTimeout: &timeout}},
-		{name: "terminate on close", params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp", TerminateOnClose: &terminate}},
+		{name: "terminate on close false", params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp", TerminateOnClose: &terminate}},
 		{name: "custom tls", params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp", TLSInsecureSkipVerify: &insecure}},
 	}
 
@@ -125,6 +143,18 @@ func TestFromAgentConfigRejectsMCPRuntimeOverrides(t *testing.T) {
 			require.ErrorContains(t, err, "MCP")
 		})
 	}
+}
+
+func TestFromAgentConfigRejectsInvalidMCPTimeout(t *testing.T) {
+	zero := 0.0
+	_, err := FromAgentConfig(&adk.AgentConfig{
+		Model: &adk.OpenAI{BaseModel: adk.BaseModel{Model: "gpt-5.4"}},
+		HttpTools: []adk.HttpMcpServerConfig{{
+			Params: adk.StreamableHTTPConnectionParams{Url: "https://mcp.example.com/mcp", Timeout: &zero},
+		}},
+	})
+
+	require.ErrorContains(t, err, "timeout")
 }
 
 func TestFromAgentConfigRejectsInvalidMCPURL(t *testing.T) {
