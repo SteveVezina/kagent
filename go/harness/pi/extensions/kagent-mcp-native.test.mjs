@@ -61,3 +61,30 @@ test("uses the compiler-sanitized dotted namespace before tool-name normalizatio
   assert.equal(registered[0].name, "mcp__math_api__lookup");
   await bridge.close();
 });
+
+test("rejects tool collisions after hyphen namespace normalization", async () => {
+  const createClient = async () => ({
+    async listTools() {
+      return [{ name: "lookup", inputSchema: { type: "object", properties: {} } }];
+    },
+    async callTool() {
+      return { content: [{ type: "text", text: "done" }] };
+    },
+    async close() {},
+  });
+
+  await assert.rejects(
+    initializeMcpBridge({
+      config: {
+        servers: [
+          { name: "math_api", url: "https://one.example/mcp" },
+          { name: "math-api", url: "https://two.example/mcp" },
+        ],
+      },
+      env: {},
+      createClient,
+      registerTool: () => assert.fail("must not register colliding tools"),
+    }),
+    /duplicate MCP tool "mcp__math_api__lookup"/,
+  );
+});
