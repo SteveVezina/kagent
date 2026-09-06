@@ -48,6 +48,9 @@ type CodexHarness struct{}
 // ClaudeHarness selects the Claude runtime adapter.
 type ClaudeHarness struct{}
 
+// PiHarness selects the Pi runtime adapter.
+type PiHarness struct{}
+
 // BYOHarness selects an image that implements kagent's private A2A contract.
 type BYOHarness struct{}
 
@@ -118,7 +121,7 @@ type HarnessAgentTemplateAdmission struct {
 
 // HarnessSpec defines a reusable runtime and its infrastructure policy.
 //
-// +kubebuilder:validation:XValidation:rule="(has(self.kagent) ? 1 : 0) + (has(self.codex) ? 1 : 0) + (has(self.claude) ? 1 : 0) + (has(self.byo) ? 1 : 0) == 1",message="exactly one of kagent, codex, claude, or byo must be specified"
+// +kubebuilder:validation:XValidation:rule="(has(self.kagent) ? 1 : 0) + (has(self.codex) ? 1 : 0) + (has(self.claude) ? 1 : 0) + (has(self.pi) ? 1 : 0) + (has(self.byo) ? 1 : 0) == 1",message="exactly one of kagent, codex, claude, pi, or byo must be specified"
 // +kubebuilder:validation:XValidation:rule="!has(self.byo) || size(self.workload.command) > 0",message="BYO harnesses must specify workload.command"
 type HarnessSpec struct {
 	// +optional
@@ -129,6 +132,9 @@ type HarnessSpec struct {
 
 	// +optional
 	Claude *ClaudeHarness `json:"claude,omitempty"`
+
+	// +optional
+	Pi *PiHarness `json:"pi,omitempty"`
 
 	// +optional
 	BYO *BYOHarness `json:"byo,omitempty"`
@@ -225,7 +231,7 @@ type HarnessStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// Harness defines a reusable agent runtime and infrastructure policy.
+// Harness defines a reusable agent runtime and its infrastructure policy.
 type Harness struct {
 	metav1.TypeMeta `json:",inline"`
 	// +optional
