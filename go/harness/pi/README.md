@@ -130,7 +130,7 @@ telemetry while still allowing configured model-provider and MCP requests.
 
 Implemented runtime behavior includes:
 
-- Pi Coding Agent `0.85.0`, pinned and version-checked.
+- Pi Coding Agent `0.85.1`, pinned and version-checked.
 - Streaming assistant text.
 - Native tool call/result events through A2A.
 - Exact Pi session resume through the continuation store.
