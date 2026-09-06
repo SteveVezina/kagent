@@ -231,7 +231,7 @@ type HarnessStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// Harness defines a reusable agent runtime and its infrastructure policy.
+// Harness defines a reusable agent runtime and infrastructure policy.
 type Harness struct {
 	metav1.TypeMeta `json:",inline"`
 	// +optional
