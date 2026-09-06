@@ -35,7 +35,7 @@ func TestProcessDriverRunsRPCProtocol(t *testing.T) {
 	argsCapture := filepath.Join(directory, "args.txt")
 	script := `#!/bin/sh
 if [ "$1" = "--version" ]; then
-  echo "0.85.0"
+  echo "0.85.1"
   exit 0
 fi
 printf '%s\n' "$*" >> "$ARGS_CAPTURE"
@@ -63,7 +63,7 @@ sleep 5
 	extension := "/usr/local/lib/kagent-pi/extensions/kagent-mcp.ts"
 	skills := "/data/pi/skills"
 	driver := NewProcessDriver(ProcessConfig{
-		Executable: executable, ExpectedVersion: "0.85.0", StrictVersion: true,
+		Executable: executable, ExpectedVersion: "0.85.1", StrictVersion: true,
 		Workspace: workspace, SessionDir: sessions, Provider: "kagent-openai", Model: "gpt-5.4",
 		SystemPrompt: "help", Environment: append(os.Environ(), "CAPTURE="+capture, "ARGS_CAPTURE="+argsCapture),
 		ExtensionPaths: []string{extension}, SkillPaths: []string{skills},
