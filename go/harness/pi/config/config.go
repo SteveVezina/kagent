@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/kagent-dev/kagent/go/api/adk"
+	"github.com/kagent-dev/kagent/go/api/agentplugin"
 )
 
 const (
@@ -25,16 +27,18 @@ const (
 // Config is the versioned, runtime-neutral Pi startup configuration.
 // Credential values remain in the process environment.
 type Config struct {
-	Version              int      `json:"version"`
-	PiExecutable         string   `json:"pi_executable"`
-	ExpectedPiVersion    string   `json:"expected_pi_version"`
-	StrictVersion        bool     `json:"strict_version"`
-	Model                string   `json:"model"`
-	Provider             Provider `json:"provider"`
-	SystemPrompt         string   `json:"system_prompt,omitempty"`
-	MaxFrameBytes        int      `json:"max_frame_bytes"`
-	MaxStderrBytes       int      `json:"max_stderr_bytes"`
-	InterruptGraceMillis int      `json:"interrupt_grace_millis"`
+	Version              int                    `json:"version"`
+	PiExecutable         string                 `json:"pi_executable"`
+	ExpectedPiVersion    string                 `json:"expected_pi_version"`
+	StrictVersion        bool                   `json:"strict_version"`
+	Model                string                 `json:"model"`
+	Provider             Provider               `json:"provider"`
+	SystemPrompt         string                 `json:"system_prompt,omitempty"`
+	SkillResources       *agentplugin.Resources `json:"skill_resources,omitempty"`
+	MCPServers           []MCPServer            `json:"mcp_servers,omitempty"`
+	MaxFrameBytes        int                    `json:"max_frame_bytes"`
+	MaxStderrBytes       int                    `json:"max_stderr_bytes"`
+	InterruptGraceMillis int                    `json:"interrupt_grace_millis"`
 }
 
 // Provider contains the compiler-owned Pi provider settings required to
@@ -44,6 +48,15 @@ type Provider struct {
 	BaseURL   string `json:"base_url"`
 	API       string `json:"api"`
 	APIKeyEnv string `json:"api_key_env"`
+}
+
+// MCPServer is one compiler-owned direct Streamable HTTP MCP server. The BYO
+// AgentConfig no longer carries the original RemoteMCPServer name, so this
+// prototype intentionally exposes selected MCP tool names without namespacing.
+type MCPServer struct {
+	URL          string            `json:"url"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	EnabledTools []string          `json:"enabled_tools,omitempty"`
 }
 
 // Production returns the pinned runtime defaults used by normal Actor launches.
@@ -70,6 +83,11 @@ func Parse(data []byte) (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
+	servers, err := normalizeMCPServers(cfg.MCPServers)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.MCPServers = servers
 	return cfg, nil
 }
 
@@ -110,6 +128,9 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("unsupported Pi provider %q", c.Provider.Name)
 	}
+	if _, err := normalizeMCPServers(c.MCPServers); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -124,14 +145,14 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 	if agent == nil || agent.Model == nil {
 		return Config{}, fmt.Errorf("Pi model is required")
 	}
-	if len(agent.HttpTools) > 0 || len(agent.SseTools) > 0 || len(agent.StdioTools) > 0 {
-		return Config{}, fmt.Errorf("Pi BYO prototype does not support MCP tools yet")
+	if len(agent.SseTools) > 0 {
+		return Config{}, fmt.Errorf("Pi BYO prototype does not support SSE MCP yet")
+	}
+	if len(agent.StdioTools) > 0 {
+		return Config{}, fmt.Errorf("Pi BYO prototype does not support stdio MCP yet")
 	}
 	if len(agent.RemoteAgents) > 0 || len(agent.SubAgents) > 0 {
 		return Config{}, fmt.Errorf("Pi BYO prototype does not support agent tools yet")
-	}
-	if agent.AgentPlugins != nil {
-		return Config{}, fmt.Errorf("Pi BYO prototype does not support Agent Plugin resources yet")
 	}
 	if agent.Memory != nil || agent.ContextConfig != nil {
 		return Config{}, fmt.Errorf("Pi BYO prototype does not support kagent memory or context configuration yet")
@@ -183,10 +204,109 @@ func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("Pi BYO prototype does not support model provider %q yet", agent.Model.GetType())
 	}
+
+	servers, err := compileMCPServers(agent.HttpTools)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.MCPServers = servers
+	if agent.AgentPlugins != nil {
+		resources := *agent.AgentPlugins
+		cfg.SkillResources = &resources
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func compileMCPServers(tools []adk.HttpMcpServerConfig) ([]MCPServer, error) {
+	servers := make([]MCPServer, 0, len(tools))
+	for _, tool := range tools {
+		if len(tool.AllowedHeaders) != 0 {
+			return nil, fmt.Errorf("Pi MCP tools do not support request header propagation yet")
+		}
+		if len(tool.RequireApproval) != 0 {
+			return nil, fmt.Errorf("Pi MCP approval is not supported yet")
+		}
+		params := tool.Params
+		if params.Timeout != nil || params.SseReadTimeout != nil || params.TerminateOnClose != nil {
+			return nil, fmt.Errorf("Pi MCP runtime timeout/close overrides are not supported yet")
+		}
+		if params.TLSInsecureSkipVerify != nil || params.TLSCACertPath != nil || params.TLSDisableSystemCAs != nil {
+			return nil, fmt.Errorf("Pi MCP custom TLS configuration is not supported yet")
+		}
+		url := strings.TrimSpace(params.Url)
+		if err := validateHTTPURL(url); err != nil {
+			return nil, fmt.Errorf("Pi MCP tools: MCP server %q URL %w", params.Url, err)
+		}
+		headers := make(map[string]string, len(params.Headers))
+		for name, value := range params.Headers {
+			if strings.TrimSpace(name) == "" {
+				return nil, fmt.Errorf("Pi MCP server %q has an empty header name", url)
+			}
+			headers[name] = value
+		}
+		selected := append([]string(nil), tool.Tools...)
+		for _, name := range selected {
+			if strings.TrimSpace(name) == "" {
+				return nil, fmt.Errorf("Pi MCP server %q has an empty enabled tool", url)
+			}
+		}
+		slices.Sort(selected)
+		selected = slices.Compact(selected)
+		servers = append(servers, MCPServer{URL: url, Headers: headers, EnabledTools: selected})
+	}
+	return normalizeMCPServers(servers)
+}
+
+func normalizeMCPServers(servers []MCPServer) ([]MCPServer, error) {
+	if len(servers) == 0 {
+		return nil, nil
+	}
+	result := make([]MCPServer, 0, len(servers))
+	for _, server := range servers {
+		server.URL = strings.TrimSpace(server.URL)
+		if err := validateHTTPURL(server.URL); err != nil {
+			return nil, fmt.Errorf("invalid Pi MCP server %q URL: %w", server.URL, err)
+		}
+		headers := make(map[string]string, len(server.Headers))
+		for name, value := range server.Headers {
+			if strings.TrimSpace(name) == "" {
+				return nil, fmt.Errorf("Pi MCP server %q has an empty header name", server.URL)
+			}
+			headers[name] = value
+		}
+		server.Headers = headers
+		selected := append([]string(nil), server.EnabledTools...)
+		seen := make(map[string]struct{}, len(selected))
+		for _, tool := range selected {
+			if strings.TrimSpace(tool) == "" {
+				return nil, fmt.Errorf("Pi MCP server %q has an empty enabled tool", server.URL)
+			}
+			if _, exists := seen[tool]; exists {
+				return nil, fmt.Errorf("Pi MCP server %q has duplicate enabled tool %q", server.URL, tool)
+			}
+			seen[tool] = struct{}{}
+		}
+		slices.Sort(selected)
+		server.EnabledTools = selected
+		result = append(result, server)
+	}
+	slices.SortFunc(result, func(a, b MCPServer) int {
+		return strings.Compare(mcpServerIdentity(a), mcpServerIdentity(b))
+	})
+	for i := 1; i < len(result); i++ {
+		if mcpServerIdentity(result[i-1]) == mcpServerIdentity(result[i]) {
+			return nil, fmt.Errorf("duplicate MCP server definition for %q", result[i].URL)
+		}
+	}
+	return result, nil
+}
+
+func mcpServerIdentity(server MCPServer) string {
+	raw, _ := json.Marshal(server)
+	return string(raw)
 }
 
 func validateOpenAITuning(model *adk.OpenAI) error {
