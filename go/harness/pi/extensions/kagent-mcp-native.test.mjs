@@ -33,8 +33,31 @@ test("namespaces native MCP tools while calling the original MCP tool name", asy
   });
 
   assert.equal(registered.length, 1);
-  assert.equal(registered[0].name, "mcp__math_server__add_numbers");
+  assert.equal(registered[0].name, "mcp__math-server__add_numbers");
   await registered[0].execute({}, new AbortController().signal);
   assert.equal(calledName, "add_numbers");
+  await bridge.close();
+});
+
+test("uses the compiler-sanitized native MCP namespace verbatim", async () => {
+  const registered = [];
+  const bridge = await initializeMcpBridge({
+    config: {
+      servers: [{ name: "math_api", url: "https://math.example/mcp" }],
+    },
+    env: {},
+    createClient: async () => ({
+      async listTools() {
+        return [{ name: "lookup", inputSchema: { type: "object", properties: {} } }];
+      },
+      async callTool() {
+        return { content: [{ type: "text", text: "done" }] };
+      },
+      async close() {},
+    }),
+    registerTool: (tool) => registered.push(tool),
+  });
+
+  assert.equal(registered[0].name, "mcp__math_api__lookup");
   await bridge.close();
 });
