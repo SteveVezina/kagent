@@ -33,7 +33,7 @@ func TestParseAcceptsNativeMCPServerName(t *testing.T) {
 		"gpt-5.4",
 		"help",
 	)
-	cfg.MCPServers = []MCPServer{{Name: "math-server", URL: "https://mcp.example.com/mcp"}}
+	cfg.MCPServers = []MCPServer{{Name: "math-server", URL: "https://mcp.example.com/mcp", TimeoutSeconds: 30}}
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
@@ -48,7 +48,7 @@ func TestParseRejectsInvalidNativeMCPServerName(t *testing.T) {
 		"gpt-5.4",
 		"help",
 	)
-	cfg.MCPServers = []MCPServer{{Name: "math.api", URL: "https://mcp.example.com/mcp"}}
+	cfg.MCPServers = []MCPServer{{Name: "math.api", URL: "https://mcp.example.com/mcp", TimeoutSeconds: 30}}
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
@@ -63,8 +63,8 @@ func TestParseRejectsDuplicateNativeMCPServerName(t *testing.T) {
 		"help",
 	)
 	cfg.MCPServers = []MCPServer{
-		{Name: "math", URL: "https://one.example.com/mcp"},
-		{Name: "math", URL: "https://two.example.com/mcp"},
+		{Name: "math", URL: "https://one.example.com/mcp", TimeoutSeconds: 30},
+		{Name: "math", URL: "https://two.example.com/mcp", TimeoutSeconds: 30},
 	}
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
