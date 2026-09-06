@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/kagent-dev/kagent/go/api/adk"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,7 +12,7 @@ func TestPinnedPiVersionMatchesPublishedPackage(t *testing.T) {
 }
 
 func TestProductionUsesPinnedRuntimeDefaults(t *testing.T) {
-	provider := Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY"}
+	provider := Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: OpenAIAPIKeyEnvName}
 	cfg := Production(provider, "gpt-5.4", "help")
 
 	require.Equal(t, Version, cfg.Version)
@@ -29,7 +28,7 @@ func TestProductionUsesPinnedRuntimeDefaults(t *testing.T) {
 }
 
 func TestParseRoundTripsProductionConfig(t *testing.T) {
-	want := Production(Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY"}, "claude-sonnet-4-5", "be concise")
+	want := Production(Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: AnthropicAPIKeyEnvName}, "claude-sonnet-4-5", "be concise")
 	raw, err := json.Marshal(want)
 	require.NoError(t, err)
 
@@ -56,7 +55,7 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 }
 
 func TestParseRejectsWrongVersion(t *testing.T) {
-	cfg := Production(Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY"}, "claude-sonnet-4-5", "")
+	cfg := Production(Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: AnthropicAPIKeyEnvName}, "claude-sonnet-4-5", "")
 	cfg.Version++
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
@@ -65,125 +64,32 @@ func TestParseRejectsWrongVersion(t *testing.T) {
 	require.ErrorContains(t, err, "unsupported config version")
 }
 
-func TestFromAgentConfigMapsOpenAI(t *testing.T) {
-	cfg, err := FromAgentConfig(&adk.AgentConfig{
-		Model:       &adk.OpenAI{BaseModel: adk.BaseModel{Model: "gpt-5.4"}},
-		Instruction: "You are a Kubernetes troubleshooting agent.",
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, Production(
-		Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY"},
-		"gpt-5.4",
-		"You are a Kubernetes troubleshooting agent.",
-	), cfg)
-}
-
-func TestFromAgentConfigMapsOpenAIGateway(t *testing.T) {
-	cfg, err := FromAgentConfig(&adk.AgentConfig{
-		Model: &adk.OpenAI{
-			BaseModel: adk.BaseModel{Model: "gpt-4.1-mini"},
-			BaseUrl:   "http://mock-llm.kagent.svc.cluster.local/v1",
-			APIFormat: "chatCompletions",
+func TestValidateRejectsProviderContractDrift(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider Provider
+		want     string
+	}{
+		{
+			name: "OpenAI API",
+			provider: Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "future", APIKeyEnv: OpenAIAPIKeyEnvName},
+			want: "OpenAI API",
 		},
-		Instruction: "Reply briefly.",
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, Production(
-		Provider{Name: "kagent-openai", BaseURL: "http://mock-llm.kagent.svc.cluster.local/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY"},
-		"gpt-4.1-mini",
-		"Reply briefly.",
-	), cfg)
-}
-
-func TestFromAgentConfigMapsOpenAIResponses(t *testing.T) {
-	cfg, err := FromAgentConfig(&adk.AgentConfig{
-		Model: &adk.OpenAI{
-			BaseModel: adk.BaseModel{Model: "gpt-5.4"},
-			APIFormat: "responses",
+		{
+			name: "OpenAI credential env",
+			provider: Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OTHER"},
+			want: OpenAIAPIKeyEnvName,
 		},
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, "https://api.openai.com/v1", cfg.Provider.BaseURL)
-	require.Equal(t, "openai-responses", cfg.Provider.API)
-}
-
-func TestFromAgentConfigRejectsUnknownOpenAIAPIFormat(t *testing.T) {
-	_, err := FromAgentConfig(&adk.AgentConfig{
-		Model: &adk.OpenAI{
-			BaseModel: adk.BaseModel{Model: "gpt-5.4"},
-			APIFormat: "future-api",
+		{
+			name: "Anthropic API",
+			provider: Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "future", APIKeyEnv: AnthropicAPIKeyEnvName},
+			want: "Anthropic API",
 		},
-	})
-
-	require.ErrorContains(t, err, "OpenAI API format")
-}
-
-func TestFromAgentConfigRejectsUnsupportedOpenAITuning(t *testing.T) {
-	temperature := 0.2
-	_, err := FromAgentConfig(&adk.AgentConfig{
-		Model: &adk.OpenAI{
-			BaseModel:   adk.BaseModel{Model: "gpt-5.4"},
-			Temperature: &temperature,
-		},
-	})
-
-	require.ErrorContains(t, err, "OpenAI model tuning")
-}
-
-func TestFromAgentConfigMapsAnthropic(t *testing.T) {
-	cfg, err := FromAgentConfig(&adk.AgentConfig{
-		Model:       &adk.Anthropic{BaseModel: adk.BaseModel{Model: "claude-sonnet-4-5"}},
-		Instruction: "Be concise.",
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, Production(
-		Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY"},
-		"claude-sonnet-4-5",
-		"Be concise.",
-	), cfg)
-}
-
-func TestFromAgentConfigMapsAnthropicGateway(t *testing.T) {
-	cfg, err := FromAgentConfig(&adk.AgentConfig{
-		Model: &adk.Anthropic{
-			BaseModel: adk.BaseModel{Model: "claude-custom"},
-			BaseUrl:   "https://gateway.example.com/anthropic",
-		},
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, "kagent-anthropic", cfg.Provider.Name)
-	require.Equal(t, "https://gateway.example.com/anthropic", cfg.Provider.BaseURL)
-	require.Equal(t, "anthropic-messages", cfg.Provider.API)
-	require.Equal(t, "ANTHROPIC_API_KEY", cfg.Provider.APIKeyEnv)
-}
-
-func TestFromAgentConfigRejectsUnsupportedAnthropicTuning(t *testing.T) {
-	maxTokens := 2048
-	_, err := FromAgentConfig(&adk.AgentConfig{
-		Model: &adk.Anthropic{
-			BaseModel: adk.BaseModel{Model: "claude-sonnet-4-5"},
-			MaxTokens: &maxTokens,
-		},
-	})
-
-	require.ErrorContains(t, err, "Anthropic model tuning")
-}
-
-func TestFromAgentConfigRejectsUnsupportedAgentFeatures(t *testing.T) {
-	_, err := FromAgentConfig(&adk.AgentConfig{
-		Model:     &adk.Anthropic{BaseModel: adk.BaseModel{Model: "claude-sonnet-4-5"}},
-		HttpTools: []adk.HttpMcpServerConfig{{}},
-	})
-
-	require.ErrorContains(t, err, "MCP tools")
-}
-
-func TestFromAgentConfigRequiresModel(t *testing.T) {
-	_, err := FromAgentConfig(&adk.AgentConfig{})
-	require.ErrorContains(t, err, "model is required")
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Production(tc.provider, "model", "")
+			require.ErrorContains(t, cfg.Validate(), tc.want)
+		})
+	}
 }

@@ -1,4 +1,5 @@
 const ENV_MARKER = /^__KAGENT_ENV\[([A-Z0-9_]+)\]__$/;
+const NATIVE_NAME = /^[A-Za-z0-9_-]+$/;
 
 export function expandHeaderValue(value, env) {
   if (typeof value !== "string") {
@@ -90,18 +91,19 @@ export async function initializeMcpBridge({ config, env, createClient, registerT
       }
 
       for (const name of selectedNames) {
-        const previous = toolOrigins.get(name);
+        const registrationName = nativeToolName(server, name);
+        const previous = toolOrigins.get(registrationName);
         if (previous) {
-          throw new Error(`duplicate MCP tool ${JSON.stringify(name)} exposed by ${previous} and ${server.url}`);
+          throw new Error(`duplicate MCP tool ${JSON.stringify(registrationName)} exposed by ${previous} and ${server.url}`);
         }
-        toolOrigins.set(name, server.url);
-        registrations.push({ server, client, tool: toolsByName.get(name) });
+        toolOrigins.set(registrationName, server.url);
+        registrations.push({ server, client, tool: toolsByName.get(name), registrationName });
       }
     }
 
-    for (const { server, client, tool } of registrations) {
+    for (const { server, client, tool, registrationName } of registrations) {
       registerTool({
-        name: tool.name,
+        name: registrationName,
         description: tool.description,
         inputSchema: tool.inputSchema,
         async execute(args, signal) {
@@ -130,6 +132,15 @@ export async function initializeMcpBridge({ config, env, createClient, registerT
       await closeClients(clients, false);
     },
   };
+}
+
+function nativeToolName(server, toolName) {
+  if (typeof server.name !== "string" || !NATIVE_NAME.test(server.name)) {
+    throw new Error(`Pi MCP server ${server.url} has an invalid native name`);
+  }
+  // Codex's native MCP tool surface converts hyphens in server namespaces to
+  // underscores even though its compiler preserves hyphens in the server key.
+  return `mcp__${server.name.replaceAll("-", "_")}__${toolName}`;
 }
 
 function expandServerHeaders(server, env) {

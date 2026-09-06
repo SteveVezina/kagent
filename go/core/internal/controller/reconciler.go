@@ -17,6 +17,7 @@ import (
 	claudetranslator "github.com/kagent-dev/kagent/go/core/internal/translator/claude"
 	codextranslator "github.com/kagent-dev/kagent/go/core/internal/translator/codex"
 	kagenttranslator "github.com/kagent-dev/kagent/go/core/internal/translator/kagent"
+	pitranslator "github.com/kagent-dev/kagent/go/core/internal/translator/pi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"istio.io/istio/pkg/kube/controllers"
@@ -62,6 +63,7 @@ func newPairReconciliations(
 			v2translator.HarnessTypeKagent: kagenttranslator.NewCompiler(ctx, collections),
 			v2translator.HarnessTypeCodex:  codextranslator.NewCompiler(ctx, collections),
 			v2translator.HarnessTypeClaude: claudetranslator.NewCompiler(ctx, collections),
+			v2translator.HarnessTypePi:     pitranslator.NewCompiler(ctx, collections),
 			v2translator.HarnessTypeBYO:    byotranslator.NewCompiler(ctx, collections),
 		}).CompileAgentTemplate(context.Background(), pair.Harness, pair.AgentTemplate)
 		if err != nil {

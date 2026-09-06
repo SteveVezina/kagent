@@ -1,4 +1,4 @@
-// Package adapter validates BYO compiler output and materializes compiler-owned Pi state.
+// Package adapter validates native compiler output and materializes compiler-owned Pi state.
 package adapter
 
 import (
@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kagent-dev/kagent/go/api/adk"
 	"github.com/kagent-dev/kagent/go/api/agentplugin"
 	"github.com/kagent-dev/kagent/go/core/pkg/agentplugins"
 	"github.com/kagent-dev/kagent/go/harness/internal/utils"
@@ -17,11 +16,7 @@ import (
 	"github.com/kagent-dev/kagent/go/harness/pi/internal/driver"
 )
 
-const (
-	piHomeEnv        = "PI_CODING_AGENT_DIR"
-	mcpConfigEnv     = "KAGENT_PI_MCP_CONFIG"
-	mcpExtensionPath = "/usr/local/lib/kagent-pi/extensions/kagent-mcp.ts"
-)
+const mcpExtensionPath = "/usr/local/lib/kagent-pi/extensions/kagent-mcp.ts"
 
 // Input contains compiler output and Actor-owned locations used to construct
 // the Pi driver.
@@ -32,20 +27,15 @@ type Input struct {
 	Environment []string
 }
 
-// New validates the supported BYO config subset, prepares private Pi state,
-// materializes compiler-owned native Pi configuration, and constructs the RPC
-// process driver.
+// New validates the native Pi config, prepares private Pi state, materializes
+// compiler-owned resources, and constructs the RPC process driver.
 func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var agent adk.AgentConfig
-	if err := json.Unmarshal(input.ConfigJSON, &agent); err != nil {
-		return nil, fmt.Errorf("decode BYO agent config: %w", err)
-	}
-	cfg, err := config.FromAgentConfig(&agent)
+	cfg, err := config.Parse(input.ConfigJSON)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode Pi config: %w", err)
 	}
 	if !filepath.IsAbs(input.Workspace) || !filepath.IsAbs(input.DurableDir) {
 		return nil, fmt.Errorf("workspace and durable directories must be absolute paths")
@@ -80,7 +70,7 @@ func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
 			return nil, fmt.Errorf("inspect Pi Agent Plugin MCP configuration: %w", err)
 		}
 		if len(pluginMCP.StreamableHTTP) != 0 || len(pluginMCP.SSE) != 0 || len(pluginMCP.Stdio) != 0 {
-			return nil, fmt.Errorf("Pi BYO prototype does not support Agent Plugin MCP servers yet")
+			return nil, fmt.Errorf("Pi Harness does not support Agent Plugin MCP servers yet")
 		}
 		if hasSelectedSkills(*cfg.SkillResources) {
 			skillPaths = []string{materialization.SkillsDirectory}
@@ -94,16 +84,16 @@ func New(ctx context.Context, input Input) (*driver.ProcessDriver, error) {
 		if err := writeMCPConfig(mcpPath, cfg.MCPServers); err != nil {
 			return nil, err
 		}
-		environment = setEnvironment(environment, mcpConfigEnv, mcpPath)
+		environment = setEnvironment(environment, config.MCPConfigEnvName, mcpPath)
 		extensionPaths = []string{mcpExtensionPath}
 	} else if err := removeGeneratedFile(mcpPath); err != nil {
 		return nil, fmt.Errorf("remove stale Pi MCP configuration: %w", err)
 	}
 
-	environment = setEnvironment(environment, piHomeEnv, piHome)
-	environment = setEnvironment(environment, "PI_OFFLINE", "1")
-	environment = setEnvironment(environment, "PI_SKIP_VERSION_CHECK", "1")
-	environment = setEnvironment(environment, "PI_TELEMETRY", "0")
+	environment = setEnvironment(environment, config.PiHomeEnvName, piHome)
+	environment = setEnvironment(environment, config.OfflineEnvName, "1")
+	environment = setEnvironment(environment, config.SkipVersionCheckEnvName, "1")
+	environment = setEnvironment(environment, config.TelemetryEnvName, "0")
 	return driver.NewProcessDriver(driver.ProcessConfig{
 		Executable: cfg.PiExecutable, ExpectedVersion: cfg.ExpectedPiVersion, StrictVersion: cfg.StrictVersion,
 		Workspace: input.Workspace, SessionDir: sessionDir, Provider: cfg.Provider.Name, Model: cfg.Model,

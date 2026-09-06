@@ -20,6 +20,7 @@ const (
 	harnessRuntimeKagent = "kagent"
 	harnessRuntimeCodex  = "codex"
 	harnessRuntimeClaude = "claude"
+	harnessRuntimePi     = "pi"
 )
 
 type harnessServer struct {
@@ -92,7 +93,7 @@ func (s *harnessServer) harness(object *v1alpha3.Harness) (*apiv1alpha1.Harness,
 
 // harnessRuntime reports which adapter the spec selects. The CRD's CEL rule
 // admits exactly one, so the empty string means an object that predates or
-// violates that rule rather than a fourth kind of runtime.
+// violates that rule rather than a supported runtime kind.
 func harnessRuntime(object *v1alpha3.Harness) string {
 	switch {
 	case object.Spec.Kagent != nil:
@@ -101,6 +102,8 @@ func harnessRuntime(object *v1alpha3.Harness) string {
 		return harnessRuntimeCodex
 	case object.Spec.Claude != nil:
 		return harnessRuntimeClaude
+	case object.Spec.Pi != nil:
+		return harnessRuntimePi
 	default:
 		return ""
 	}

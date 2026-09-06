@@ -104,10 +104,9 @@ metadata:
   name: pi-e2e
   namespace: kagent
 spec:
-  byo: {}
+  pi: {}
   workload:
     image: ${KAGENT_E2E_PI_IMAGE}
-    command: ["/usr/local/bin/kagent-pi"]
   substrate:
     workerPoolRef:
       name: kagent-default
