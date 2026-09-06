@@ -60,10 +60,13 @@ sleep 5
 	if err := os.Mkdir(sessions, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	extension := "/usr/local/lib/kagent-pi/extensions/kagent-mcp.ts"
+	skills := "/data/pi/skills"
 	driver := NewProcessDriver(ProcessConfig{
 		Executable: executable, ExpectedVersion: "0.85.0", StrictVersion: true,
 		Workspace: workspace, SessionDir: sessions, Provider: "kagent-openai", Model: "gpt-5.4",
 		SystemPrompt: "help", Environment: append(os.Environ(), "CAPTURE="+capture, "ARGS_CAPTURE="+argsCapture),
+		ExtensionPaths: []string{extension}, SkillPaths: []string{skills},
 		MaxLineBytes: 4096, MaxStderrBytes: 1024, InterruptGrace: 100 * time.Millisecond,
 	})
 	if err := driver.Validate(context.Background()); err != nil {
@@ -91,7 +94,11 @@ sleep 5
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fragment := range []string{"--mode rpc", "--offline", "--provider kagent-openai", "--model gpt-5.4", "--system-prompt help", "--no-approve", "--no-context-files", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"} {
+	for _, fragment := range []string{
+		"--mode rpc", "--offline", "--provider kagent-openai", "--model gpt-5.4", "--system-prompt help",
+		"--no-approve", "--no-context-files", "--no-extensions", "-e " + extension,
+		"--no-skills", "--skill " + skills, "--no-prompt-templates", "--no-themes",
+	} {
 		if !bytes.Contains(args, []byte(fragment)) {
 			t.Errorf("Pi args omit %q:\n%s", fragment, args)
 		}
@@ -107,6 +114,19 @@ sleep 5
 	}
 	if !bytes.Contains(args, []byte("--session session-123")) {
 		t.Fatalf("resume did not select the exact Pi session:\n%s", args)
+	}
+}
+
+func TestProcessDriverWithoutCompiledResourcesOmitsExplicitPaths(t *testing.T) {
+	args := processArgs(ProcessConfig{
+		Provider: "kagent-openai", Model: "gpt-5.4", SessionDir: "/data/pi/sessions", SystemPrompt: "help",
+	})
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, " -e ") || strings.Contains(joined, " --skill ") {
+		t.Fatalf("resource-free Pi args unexpectedly load explicit resources: %s", joined)
+	}
+	if !strings.Contains(joined, "--no-extensions") || !strings.Contains(joined, "--no-skills") {
+		t.Fatalf("resource-free Pi args must keep ambient resources disabled: %s", joined)
 	}
 }
 
