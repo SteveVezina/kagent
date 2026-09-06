@@ -1,0 +1,77 @@
+{
+  "openai": [
+    {
+      "name": "pi_mcp_start",
+      "match": {
+        "match_type": "contains",
+        "message": {
+          "content": "Add 3 and 5 using the configured MCP server.",
+          "role": "user"
+        }
+      },
+      "response": {
+        "id": "chatcmpl-pi-mcp-start",
+        "object": "chat.completion",
+        "created": 1677652292,
+        "model": "gpt-4.1-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": null,
+              "tool_calls": [
+                {
+                  "id": "call_pi_mcp_add",
+                  "type": "function",
+                  "function": {
+                    "name": "add_numbers",
+                    "arguments": "{\"a\":3,\"b\":5}"
+                  }
+                }
+              ]
+            },
+            "finish_reason": "tool_calls"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 12,
+          "completion_tokens": 7,
+          "total_tokens": 19
+        }
+      }
+    },
+    {
+      "name": "pi_mcp_result",
+      "match": {
+        "match_type": "contains",
+        "message": {
+          "content": "8",
+          "role": "tool",
+          "tool_call_id": "call_pi_mcp_add"
+        }
+      },
+      "response": {
+        "id": "chatcmpl-pi-mcp-done",
+        "object": "chat.completion",
+        "created": 1677652293,
+        "model": "gpt-4.1-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "PI_MCP_DONE result is 8"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 16,
+          "completion_tokens": 7,
+          "total_tokens": 23
+        }
+      }
+    }
+  ]
+}
