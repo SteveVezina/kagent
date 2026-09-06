@@ -19,7 +19,7 @@ import (
 
 const (
 	Version                 = 1
-	PinnedPiVersion         = "0.85.0"
+	PinnedPiVersion         = "0.85.1"
 	defaultOpenAIBaseURL    = "https://api.openai.com/v1"
 	defaultAnthropicBaseURL = "https://api.anthropic.com"
 )
