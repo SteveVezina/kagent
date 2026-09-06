@@ -33,13 +33,13 @@ test("namespaces native MCP tools while calling the original MCP tool name", asy
   });
 
   assert.equal(registered.length, 1);
-  assert.equal(registered[0].name, "mcp__math-server__add_numbers");
+  assert.equal(registered[0].name, "mcp__math_server__add_numbers");
   await registered[0].execute({}, new AbortController().signal);
   assert.equal(calledName, "add_numbers");
   await bridge.close();
 });
 
-test("uses the compiler-sanitized native MCP namespace verbatim", async () => {
+test("uses the compiler-sanitized dotted namespace before tool-name normalization", async () => {
   const registered = [];
   const bridge = await initializeMcpBridge({
     config: {
