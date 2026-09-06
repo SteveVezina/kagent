@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ type ProcessConfig struct {
 	Model           string
 	SystemPrompt    string
 	Environment     []string
+	ExtensionPaths  []string
+	SkillPaths      []string
 	MaxLineBytes    int
 	MaxStderrBytes  int
 	InterruptGrace  time.Duration
@@ -36,8 +39,12 @@ type ProcessDriver struct{ config ProcessConfig }
 // NewProcessDriver constructs a Pi process driver.
 func NewProcessDriver(config ProcessConfig) *ProcessDriver { return &ProcessDriver{config: config} }
 
-// Validate checks that the configured executable is the pinned Pi version.
+// Validate checks that the configured executable is the pinned Pi version and
+// that any explicitly loaded compiler-owned resources use absolute paths.
 func (d *ProcessDriver) Validate(ctx context.Context) error {
+	if err := validateResourcePaths(d.config); err != nil {
+		return err
+	}
 	executable, err := exec.LookPath(d.config.Executable)
 	if err != nil {
 		return fmt.Errorf("find Pi executable %q: %w", d.config.Executable, err)
@@ -59,24 +66,14 @@ func (d *ProcessDriver) Run(ctx context.Context, turn runtime.Turn, sink runtime
 	if strings.TrimSpace(turn.Prompt) == "" {
 		return runtime.Outcome{}, fmt.Errorf("Pi prompt is required")
 	}
+	if err := validateResourcePaths(d.config); err != nil {
+		return runtime.Outcome{}, err
+	}
 	executable, err := exec.LookPath(d.config.Executable)
 	if err != nil {
 		return runtime.Outcome{}, fmt.Errorf("find Pi executable %q: %w", d.config.Executable, err)
 	}
-	args := []string{
-		"--mode", "rpc",
-		"--offline",
-		"--provider", d.config.Provider,
-		"--model", d.config.Model,
-		"--session-dir", d.config.SessionDir,
-		"--system-prompt", d.config.SystemPrompt,
-		"--no-approve",
-		"--no-context-files",
-		"--no-extensions",
-		"--no-skills",
-		"--no-prompt-templates",
-		"--no-themes",
-	}
+	args := processArgs(d.config)
 	if turn.ContinuationID != "" {
 		args = append(args, "--session", turn.ContinuationID)
 	}
@@ -131,6 +128,47 @@ func (d *ProcessDriver) Run(ctx context.Context, turn runtime.Turn, sink runtime
 		return runtime.Outcome{}, err
 	}
 	return d.consume(ctx, client, command, wait, stderr, sink)
+}
+
+func processArgs(config ProcessConfig) []string {
+	args := []string{
+		"--mode", "rpc",
+		"--offline",
+		"--provider", config.Provider,
+		"--model", config.Model,
+		"--session-dir", config.SessionDir,
+		"--system-prompt", config.SystemPrompt,
+		"--no-approve",
+		"--no-context-files",
+		"--no-extensions",
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-themes",
+	}
+	for _, path := range config.ExtensionPaths {
+		args = append(args, "-e", path)
+	}
+	for _, path := range config.SkillPaths {
+		args = append(args, "--skill", path)
+	}
+	return args
+}
+
+func validateResourcePaths(config ProcessConfig) error {
+	for _, resource := range []struct {
+		kind  string
+		paths []string
+	}{
+		{kind: "extension", paths: config.ExtensionPaths},
+		{kind: "skill", paths: config.SkillPaths},
+	} {
+		for _, path := range resource.paths {
+			if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) {
+				return fmt.Errorf("Pi compiler-owned %s path %q must be absolute", resource.kind, path)
+			}
+		}
+	}
+	return nil
 }
 
 type responseEnvelope struct {
