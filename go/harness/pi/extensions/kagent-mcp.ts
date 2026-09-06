@@ -46,17 +46,32 @@ async function createClient(server) {
   const transport = new StreamableHTTPClientTransport(new URL(server.url), {
     requestInit: { headers: server.headers },
   });
-  await client.connect(transport);
+  await client.connect(transport, requestOptions(undefined, server.timeout_seconds));
   return {
-    async listTools() {
-      const result = await client.listTools();
+    async listTools(timeoutSeconds) {
+      const result = await client.listTools(undefined, requestOptions(undefined, timeoutSeconds));
       return result.tools;
     },
-    async callTool(name, args, signal) {
-      return client.callTool({ name, arguments: args }, undefined, { signal });
+    async callTool(name, args, signal, timeoutSeconds) {
+      return client.callTool(
+        { name, arguments: args },
+        undefined,
+        requestOptions(signal, timeoutSeconds),
+      );
     },
     async close() {
       await client.close();
     },
   };
+}
+
+function requestOptions(signal, timeoutSeconds) {
+  const options = {};
+  if (signal) {
+    options.signal = signal;
+  }
+  if (typeof timeoutSeconds === "number" && timeoutSeconds > 0) {
+    options.timeout = Math.ceil(timeoutSeconds * 1000);
+  }
+  return options;
 }
