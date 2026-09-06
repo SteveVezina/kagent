@@ -1,4 +1,5 @@
 const ENV_MARKER = /^__KAGENT_ENV\[([A-Z0-9_]+)\]__$/;
+const NATIVE_NAME = /^[A-Za-z0-9_-]+$/;
 
 export function expandHeaderValue(value, env) {
   if (typeof value !== "string") {
@@ -134,13 +135,10 @@ export async function initializeMcpBridge({ config, env, createClient, registerT
 }
 
 function nativeToolName(server, toolName) {
-  if (server.name === undefined || server.name === "") {
-    return toolName;
+  if (typeof server.name !== "string" || !NATIVE_NAME.test(server.name)) {
+    throw new Error(`Pi MCP server ${server.url} has an invalid native name`);
   }
-  if (typeof server.name !== "string") {
-    throw new Error(`Pi MCP server ${server.url} has an invalid name`);
-  }
-  return `mcp__${server.name.replaceAll("-", "_")}__${toolName}`;
+  return `mcp__${server.name}__${toolName}`;
 }
 
 function expandServerHeaders(server, env) {
