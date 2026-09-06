@@ -29,6 +29,7 @@ func (c *Compiler) compileMCP(ctx context.Context, namespace string, tools []v2t
 	result := mcpCompilation{servers: make([]piconfig.MCPServer, 0, len(tools))}
 	seenServers := map[string]struct{}{}
 	nativeNames := map[string]string{}
+	toolNamespaces := map[string]string{}
 	for _, tool := range tools {
 		server := tool.Server
 		if server == nil {
@@ -43,12 +44,20 @@ func (c *Compiler) compileMCP(ctx context.Context, namespace string, tools []v2t
 		seenServers[server.Name] = struct{}{}
 
 		// Kubernetes object names may contain dots, while native tool names may not.
-		// Codex and Claude use the same dot-to-underscore normalization.
+		// Codex and Claude use the same dot-to-underscore normalization for their
+		// server keys. Pi additionally converts hyphens to underscores when it
+		// builds the final mcp__<server>__<tool> registration name, so reserve that
+		// final namespace here as well to fail before Actor startup.
 		nativeName := strings.ReplaceAll(server.Name, ".", "_")
 		if previous, exists := nativeNames[nativeName]; exists {
 			return mcpCompilation{}, v2translator.NewValidationError("Pi MCP servers %q and %q map to the same native namespace %q", previous, server.Name, nativeName)
 		}
 		nativeNames[nativeName] = server.Name
+		toolNamespace := strings.ReplaceAll(nativeName, "-", "_")
+		if previous, exists := toolNamespaces[toolNamespace]; exists {
+			return mcpCompilation{}, v2translator.NewValidationError("Pi MCP servers %q and %q map to the same Pi tool namespace %q", previous, server.Name, toolNamespace)
+		}
+		toolNamespaces[toolNamespace] = server.Name
 
 		if server.Spec.Protocol != "" && server.Spec.Protocol != v1alpha3.RemoteMCPServerProtocolStreamableHttp {
 			return mcpCompilation{}, v2translator.NewValidationError("Pi RemoteMCPServer %q requires Streamable HTTP", server.Name)
