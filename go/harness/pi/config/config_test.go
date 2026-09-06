@@ -8,7 +8,7 @@ import (
 )
 
 func TestPinnedPiVersionMatchesPublishedPackage(t *testing.T) {
-	require.Equal(t, "0.85.0", PinnedPiVersion)
+	require.Equal(t, "0.85.1", PinnedPiVersion)
 }
 
 func TestProductionUsesPinnedRuntimeDefaults(t *testing.T) {
@@ -41,7 +41,7 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 	_, err := Parse([]byte(`{
 		"version":1,
 		"pi_executable":"pi",
-		"expected_pi_version":"0.85.0",
+		"expected_pi_version":"0.85.1",
 		"strict_version":true,
 		"model":"gpt-5.4",
 		"provider":{"name":"kagent-openai","base_url":"https://api.openai.com/v1","api":"openai-completions","api_key_env":"OPENAI_API_KEY"},
