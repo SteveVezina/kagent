@@ -36,3 +36,16 @@ func TestCompileMCPRejectsNativeNameCollision(t *testing.T) {
 	_, err := (&Compiler{}).compileMCP(context.Background(), "test", []v2translator.ResolvedMCPTool{{Server: first}, {Server: second}})
 	require.ErrorContains(t, err, "map to the same native namespace")
 }
+
+func TestCompileMCPRejectsFinalToolNamespaceCollision(t *testing.T) {
+	first := &v1alpha3.RemoteMCPServer{
+		ObjectMeta: metav1.ObjectMeta{Name: "math.api", Namespace: "test"},
+		Spec:       v1alpha3.RemoteMCPServerSpec{URL: "https://one.example.com/mcp"},
+	}
+	second := &v1alpha3.RemoteMCPServer{
+		ObjectMeta: metav1.ObjectMeta{Name: "math-api", Namespace: "test"},
+		Spec:       v1alpha3.RemoteMCPServerSpec{URL: "https://two.example.com/mcp"},
+	}
+	_, err := (&Compiler{}).compileMCP(context.Background(), "test", []v2translator.ResolvedMCPTool{{Server: first}, {Server: second}})
+	require.ErrorContains(t, err, "map to the same Pi tool namespace")
+}
