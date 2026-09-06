@@ -6,7 +6,7 @@ import { initializeMcpBridge } from "./kagent-mcp-core.mjs";
 test("registered tool throws when MCP returns isError", async () => {
   const registered = [];
   const bridge = await initializeMcpBridge({
-    config: { servers: [{ url: "https://one.example/mcp" }] },
+    config: { servers: [{ name: "one", url: "https://one.example/mcp" }] },
     env: {},
     createClient: async () => ({
       async listTools() {
