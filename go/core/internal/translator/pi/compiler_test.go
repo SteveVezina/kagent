@@ -31,27 +31,34 @@ func TestCompileSupportedProviders(t *testing.T) {
 		{
 			name: "OpenAI chat completions",
 			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI, Model: "gpt-5.1", APIKeySecret: "model-auth", APIKeySecretKey: "api-key", OpenAI: &v1alpha3.OpenAIConfig{APIFormat: &chat}},
-			provider: piconfig.Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY"},
+			provider: piconfig.Provider{Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: piconfig.OpenAIAPIKeyEnvName},
 			egress: []string{"api.openai.com"},
 		},
 		{
 			name: "OpenAI responses gateway",
 			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI, Model: "gpt-5.1", APIKeySecret: "model-auth", APIKeySecretKey: "api-key", OpenAI: &v1alpha3.OpenAIConfig{APIFormat: &responses, BaseURL: "https://gateway.example.com/v1"}},
-			provider: piconfig.Provider{Name: "kagent-openai", BaseURL: "https://gateway.example.com/v1", API: "openai-responses", APIKeyEnv: "OPENAI_API_KEY"},
+			provider: piconfig.Provider{Name: "kagent-openai", BaseURL: "https://gateway.example.com/v1", API: "openai-responses", APIKeyEnv: piconfig.OpenAIAPIKeyEnvName},
 			egress: []string{"gateway.example.com"},
 		},
 		{
 			name: "Anthropic",
 			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-sonnet", APIKeySecret: "model-auth", APIKeySecretKey: "api-key"},
-			provider: piconfig.Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY"},
+			provider: piconfig.Provider{Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: piconfig.AnthropicAPIKeyEnvName},
 			egress: []string{"api.anthropic.com"},
+		},
+		{
+			name: "Anthropic gateway",
+			model: v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderAnthropic, Model: "claude-custom", APIKeySecret: "model-auth", APIKeySecretKey: "api-key", Anthropic: &v1alpha3.AnthropicConfig{BaseURL: "https://anthropic-gateway.example.com"}},
+			provider: piconfig.Provider{Name: "kagent-anthropic", BaseURL: "https://anthropic-gateway.example.com", API: "anthropic-messages", APIKeyEnv: piconfig.AnthropicAPIKeyEnvName},
+			egress: []string{"anthropic-gateway.example.com"},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			input, collections := piTestInput(t, test.model, map[string][]byte{"api-key": []byte(piCredentialValue)})
-			result, err := NewCompiler(krt.TestingDummyContext{}, collections).Compile(context.Background(), input)
+			compiler := NewCompiler(krt.TestingDummyContext{}, collections)
+			result, err := compiler.Compile(context.Background(), input)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,7 +78,21 @@ func TestCompileSupportedProviders(t *testing.T) {
 			if len(result.Environment) != 1 || result.Environment[0].Value != piCredentialValue || result.Environment[0].ValueFrom != nil {
 				t.Fatalf("resolved environment = %#v", result.Environment)
 			}
+			again, err := compiler.Compile(context.Background(), input)
+			if err != nil || !reflect.DeepEqual(result, again) {
+				t.Fatalf("Pi compilation is not deterministic: err=%v\nfirst=%#v\nsecond=%#v", err, result, again)
+			}
 		})
+	}
+}
+
+func TestCompileRejectsMissingCredential(t *testing.T) {
+	chat := v1alpha3.OpenAIAPIFormatChatCompletions
+	model := v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI, Model: "gpt", OpenAI: &v1alpha3.OpenAIConfig{APIFormat: &chat}}
+	input, collections := piTestInput(t, model, nil)
+	_, err := NewCompiler(krt.TestingDummyContext{}, collections).Compile(context.Background(), input)
+	if err == nil || !strings.Contains(err.Error(), "apiKeySecret") {
+		t.Fatalf("missing credential Compile() error = %v", err)
 	}
 }
 
@@ -97,11 +118,20 @@ func TestCompileRejectsUnsupportedProviderConfiguration(t *testing.T) {
 func TestCompileRejectsReservedHarnessEnvironment(t *testing.T) {
 	chat := v1alpha3.OpenAIAPIFormatChatCompletions
 	model := v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI, Model: "gpt", APIKeySecret: "model-auth", APIKeySecretKey: "api-key", OpenAI: &v1alpha3.OpenAIConfig{APIFormat: &chat}}
-	input, collections := piTestInput(t, model, map[string][]byte{"api-key": []byte("secret")})
-	value := "override"
-	input.Harness.Spec.Env = []v1alpha3.HarnessEnvVar{{Name: "OPENAI_API_KEY", Value: &value}}
-	if _, err := NewCompiler(krt.TestingDummyContext{}, collections).Compile(context.Background(), input); err == nil || !strings.Contains(err.Error(), "conflicts with Pi") {
-		t.Fatalf("reserved environment Compile() error = %v", err)
+	for _, name := range []string{
+		piconfig.OpenAIAPIKeyEnvName,
+		piconfig.PiHomeEnvName,
+		piconfig.MCPConfigEnvName,
+		piconfig.MCPCredentialEnvPrefix + "0123ABCD",
+	} {
+		t.Run(name, func(t *testing.T) {
+			input, collections := piTestInput(t, model, map[string][]byte{"api-key": []byte("secret")})
+			value := "override"
+			input.Harness.Spec.Env = []v1alpha3.HarnessEnvVar{{Name: name, Value: &value}}
+			if _, err := NewCompiler(krt.TestingDummyContext{}, collections).Compile(context.Background(), input); err == nil || !strings.Contains(err.Error(), "Pi-owned") {
+				t.Fatalf("reserved environment Compile() error = %v", err)
+			}
+		})
 	}
 }
 
@@ -113,8 +143,8 @@ func TestCompileMCPPreservesIdentityAndCredentials(t *testing.T) {
 	terminate := true
 	server := &v1alpha3.RemoteMCPServer{ObjectMeta: metav1.ObjectMeta{Name: "math-server", Namespace: "test", UID: "mcp"}, Spec: v1alpha3.RemoteMCPServerSpec{
 		Protocol: v1alpha3.RemoteMCPServerProtocolStreamableHttp,
-		URL: "https://mcp.example.com/mcp",
-		Timeout: timeout,
+		URL:      "https://mcp.example.com/mcp",
+		Timeout:  timeout,
 		TerminateOnClose: &terminate,
 		HeadersFrom: []v1alpha3.ValueRef{{Name: "Authorization", ValueFrom: &v1alpha3.ValueSource{Type: v1alpha3.SecretValueSource, Name: "model-auth", Key: "mcp-token"}}},
 	}}
@@ -134,14 +164,44 @@ func TestCompileMCPPreservesIdentityAndCredentials(t *testing.T) {
 	if !reflect.DeepEqual(cfg.MCPServers[0].EnabledTools, []string{"add_numbers", "subtract"}) || cfg.MCPServers[0].TimeoutSeconds != 45 {
 		t.Fatalf("compiled MCP server = %#v", cfg.MCPServers[0])
 	}
-	if value := cfg.MCPServers[0].Headers["Authorization"]; !strings.HasPrefix(value, "${KAGENT_PI_MCP_CREDENTIAL_") {
+	if value := cfg.MCPServers[0].Headers["Authorization"]; !strings.HasPrefix(value, "__KAGENT_ENV["+piconfig.MCPCredentialEnvPrefix) || !strings.HasSuffix(value, "]__") {
 		t.Fatalf("MCP Authorization header = %q", value)
 	}
 	if bytes.Contains(result.ConfigJSON, []byte(piCredentialValue)) || bytes.Contains(result.Provenance, []byte(piCredentialValue)) {
 		t.Fatal("MCP credential leaked into immutable Pi revision")
 	}
+	if !bytes.Contains(result.Provenance, []byte(`"kind":"RemoteMCPServer"`)) {
+		t.Fatalf("MCP provenance missing RemoteMCPServer: %s", result.Provenance)
+	}
 	if !reflect.DeepEqual(result.EgressDestinations, []string{"api.openai.com", "mcp.example.com"}) {
 		t.Fatalf("egress = %v", result.EgressDestinations)
+	}
+}
+
+func TestCompileMCPConfigMapHeader(t *testing.T) {
+	chat := v1alpha3.OpenAIAPIFormatChatCompletions
+	model := v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI, Model: "gpt", APIKeySecret: "model-auth", APIKeySecretKey: "api-key", OpenAI: &v1alpha3.OpenAIConfig{APIFormat: &chat}}
+	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "mcp-headers", Namespace: "test", UID: "config-map"}, Data: map[string]string{"tenant": "team-a"}}
+	input, collections := piTestInput(t, model, map[string][]byte{"api-key": []byte("secret")}, configMap)
+	server := &v1alpha3.RemoteMCPServer{ObjectMeta: metav1.ObjectMeta{Name: "tools", Namespace: "test", UID: "mcp"}, Spec: v1alpha3.RemoteMCPServerSpec{
+		URL: "https://mcp.example.com/mcp",
+		HeadersFrom: []v1alpha3.ValueRef{{Name: "X-Tenant", ValueFrom: &v1alpha3.ValueSource{Type: v1alpha3.ConfigMapValueSource, Name: configMap.Name, Key: "tenant"}}},
+	}}
+	input.Root.MCPTools = []v2translator.ResolvedMCPTool{{Server: server}}
+
+	result, err := NewCompiler(krt.TestingDummyContext{}, collections).Compile(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := piconfig.Parse(result.ConfigJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.MCPServers[0].Headers["X-Tenant"]; got != "team-a" {
+		t.Fatalf("X-Tenant = %q, want team-a", got)
+	}
+	if !bytes.Contains(result.Provenance, []byte(`"kind":"ConfigMap"`)) {
+		t.Fatalf("MCP provenance missing ConfigMap: %s", result.Provenance)
 	}
 }
 
@@ -167,7 +227,18 @@ func TestCompileSkillResources(t *testing.T) {
 	}
 }
 
-func piTestInput(t *testing.T, modelSpec v1alpha3.ModelConfigSpec, secretData map[string][]byte) (*v2translator.HarnessInput, v2translator.Collections) {
+func TestCompileRejectsSharedAgentUntilNativeSupportLands(t *testing.T) {
+	chat := v1alpha3.OpenAIAPIFormatChatCompletions
+	model := v1alpha3.ModelConfigSpec{Provider: v1alpha3.ModelProviderOpenAI, Model: "gpt", APIKeySecret: "model-auth", APIKeySecretKey: "api-key", OpenAI: &v1alpha3.OpenAIConfig{APIFormat: &chat}}
+	input, collections := piTestInput(t, model, map[string][]byte{"api-key": []byte("secret")})
+	input.Root.Shared = []v2translator.AgentInputBinding{{Name: "reviewer", Agent: &v2translator.AgentInput{}}}
+	_, err := NewCompiler(krt.TestingDummyContext{}, collections).Compile(context.Background(), input)
+	if err == nil || !strings.Contains(err.Error(), "Shared AgentTemplate") {
+		t.Fatalf("Shared agent Compile() error = %v", err)
+	}
+}
+
+func piTestInput(t *testing.T, modelSpec v1alpha3.ModelConfigSpec, secretData map[string][]byte, objects ...any) (*v2translator.HarnessInput, v2translator.Collections) {
 	t.Helper()
 	harness := &v1alpha3.Harness{ObjectMeta: metav1.ObjectMeta{Name: "pi", Namespace: "test", UID: "harness"}, Spec: v1alpha3.HarnessSpec{
 		Pi: &v1alpha3.PiHarness{}, Workload: v1alpha3.HarnessWorkload{Image: "example.com/pi@sha256:" + strings.Repeat("a", 64)},
@@ -176,7 +247,9 @@ func piTestInput(t *testing.T, modelSpec v1alpha3.ModelConfigSpec, secretData ma
 	template := &v1alpha3.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Name: "assistant", Namespace: "test", UID: "template"}, Spec: v1alpha3.AgentTemplateSpec{ModelConfig: &corev1.LocalObjectReference{Name: "model"}, Description: "assistant"}}
 	model := &v1alpha3.ModelConfig{ObjectMeta: metav1.ObjectMeta{Name: "model", Namespace: "test", UID: "model"}, Spec: modelSpec}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "model-auth", Namespace: "test", UID: "secret"}, Data: secretData}
-	mock := krttest.NewMock(t, []any{secret})
+	all := []any{secret}
+	all = append(all, objects...)
+	mock := krttest.NewMock(t, all)
 	collections := v2translator.Collections{Secrets: krttest.GetMockCollection[*corev1.Secret](mock), ConfigMaps: krttest.GetMockCollection[*corev1.ConfigMap](mock)}
 	return &v2translator.HarnessInput{Harness: harness, Root: &v2translator.AgentInput{Template: template, ResolvedModelConfig: &v2translator.ResolvedModelConfig{Config: model}, Instruction: "help carefully"}}, collections
 }
