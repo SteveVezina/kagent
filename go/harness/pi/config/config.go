@@ -18,7 +18,7 @@ import (
 
 const (
 	Version         = 1
-	PinnedPiVersion = "0.85.0"
+	PinnedPiVersion = "0.85.1"
 
 	PiHomeEnvName           = "PI_CODING_AGENT_DIR"
 	MCPConfigEnvName        = "KAGENT_PI_MCP_CONFIG"
