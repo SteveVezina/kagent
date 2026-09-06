@@ -54,9 +54,10 @@ type Provider struct {
 // AgentConfig no longer carries the original RemoteMCPServer name, so this
 // prototype intentionally exposes selected MCP tool names without namespacing.
 type MCPServer struct {
-	URL          string            `json:"url"`
-	Headers      map[string]string `json:"headers,omitempty"`
-	EnabledTools []string          `json:"enabled_tools,omitempty"`
+	URL            string            `json:"url"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	EnabledTools   []string          `json:"enabled_tools,omitempty"`
+	TimeoutSeconds float64           `json:"timeout_seconds,omitempty"`
 }
 
 // Production returns the pinned runtime defaults used by normal Actor launches.
@@ -230,11 +231,21 @@ func compileMCPServers(tools []adk.HttpMcpServerConfig) ([]MCPServer, error) {
 			return nil, fmt.Errorf("Pi MCP approval is not supported yet")
 		}
 		params := tool.Params
-		if params.Timeout != nil || params.SseReadTimeout != nil || params.TerminateOnClose != nil {
-			return nil, fmt.Errorf("Pi MCP runtime timeout/close overrides are not supported yet")
+		if params.SseReadTimeout != nil {
+			return nil, fmt.Errorf("Pi MCP SSE read timeout is not supported for Streamable HTTP yet")
+		}
+		if params.TerminateOnClose != nil && !*params.TerminateOnClose {
+			return nil, fmt.Errorf("Pi MCP terminateOnClose=false is not supported yet")
 		}
 		if params.TLSInsecureSkipVerify != nil || params.TLSCACertPath != nil || params.TLSDisableSystemCAs != nil {
 			return nil, fmt.Errorf("Pi MCP custom TLS configuration is not supported yet")
+		}
+		timeoutSeconds := 0.0
+		if params.Timeout != nil {
+			if *params.Timeout <= 0 {
+				return nil, fmt.Errorf("Pi MCP timeout must be positive")
+			}
+			timeoutSeconds = *params.Timeout
 		}
 		url := strings.TrimSpace(params.Url)
 		if err := validateHTTPURL(url); err != nil {
@@ -255,7 +266,9 @@ func compileMCPServers(tools []adk.HttpMcpServerConfig) ([]MCPServer, error) {
 		}
 		slices.Sort(selected)
 		selected = slices.Compact(selected)
-		servers = append(servers, MCPServer{URL: url, Headers: headers, EnabledTools: selected})
+		servers = append(servers, MCPServer{
+			URL: url, Headers: headers, EnabledTools: selected, TimeoutSeconds: timeoutSeconds,
+		})
 	}
 	return normalizeMCPServers(servers)
 }
@@ -269,6 +282,9 @@ func normalizeMCPServers(servers []MCPServer) ([]MCPServer, error) {
 		server.URL = strings.TrimSpace(server.URL)
 		if err := validateHTTPURL(server.URL); err != nil {
 			return nil, fmt.Errorf("invalid Pi MCP server %q URL: %w", server.URL, err)
+		}
+		if server.TimeoutSeconds < 0 {
+			return nil, fmt.Errorf("Pi MCP server %q timeout must not be negative", server.URL)
 		}
 		headers := make(map[string]string, len(server.Headers))
 		for name, value := range server.Headers {
