@@ -1,0 +1,66 @@
+{
+  "openai": [
+    {
+      "name": "pi_first_turn",
+      "match": {
+        "match_type": "contains",
+        "message": {
+          "content": "Return exactly PI_MOCK_FIRST.",
+          "role": "user"
+        }
+      },
+      "response": {
+        "id": "chatcmpl-pi-1",
+        "object": "chat.completion",
+        "created": 1677652288,
+        "model": "gpt-4.1-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "PI_MOCK_FIRST",
+              "role": "assistant"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 10,
+          "completion_tokens": 4,
+          "total_tokens": 14
+        }
+      }
+    },
+    {
+      "name": "pi_second_turn",
+      "match": {
+        "match_type": "contains",
+        "message": {
+          "content": "Return exactly PI_MOCK_SECOND.",
+          "role": "user"
+        }
+      },
+      "response": {
+        "id": "chatcmpl-pi-2",
+        "object": "chat.completion",
+        "created": 1677652289,
+        "model": "gpt-4.1-mini",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "content": "PI_MOCK_SECOND",
+              "role": "assistant"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 14,
+          "completion_tokens": 4,
+          "total_tokens": 18
+        }
+      }
+    }
+  ]
+}
