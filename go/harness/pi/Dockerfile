@@ -27,8 +27,21 @@ RUN apk add --no-cache bash ca-certificates git \
     && npm install -g --ignore-scripts --omit=dev --no-audit --no-fund \
         "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}" \
     && test "$(pi --version)" = "${PI_CODING_AGENT_VERSION}" \
-    && pi --help >/dev/null \
-    && addgroup -S -g 65532 kagent \
+    && pi --help >/dev/null
+
+COPY harness/pi/extensions/package.json /usr/local/lib/kagent-pi/package.json
+RUN npm install --prefix /usr/local/lib/kagent-pi \
+        --ignore-scripts --omit=dev --no-audit --no-fund --package-lock=false
+COPY harness/pi/extensions/kagent-mcp-core.mjs /usr/local/lib/kagent-pi/extensions/kagent-mcp-core.mjs
+COPY harness/pi/extensions/kagent-mcp-core.test.mjs /usr/local/lib/kagent-pi/extensions/kagent-mcp-core.test.mjs
+COPY harness/pi/extensions/kagent-mcp-error.test.mjs /usr/local/lib/kagent-pi/extensions/kagent-mcp-error.test.mjs
+COPY harness/pi/extensions/kagent-mcp.ts /usr/local/lib/kagent-pi/extensions/kagent-mcp.ts
+RUN node --test /usr/local/lib/kagent-pi/extensions/*.test.mjs \
+    && rm /usr/local/lib/kagent-pi/extensions/*.test.mjs \
+    && chown -R root:root /usr/local/lib/kagent-pi \
+    && chmod -R go-w /usr/local/lib/kagent-pi
+
+RUN addgroup -S -g 65532 kagent \
     && adduser -S -D -H -u 65532 -G kagent -h /data -s /sbin/nologin kagent \
     && mkdir -p /data/adapter /data/pi /data/workspace \
     && chown -R 65532:65532 /data
