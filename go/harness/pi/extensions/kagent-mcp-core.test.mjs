@@ -134,6 +134,30 @@ test("forwards MCP arguments and abort signal to tools/call", async () => {
   await bridge.close();
 });
 
+test("forwards configured timeout to tools/list and tools/call", async () => {
+  const registered = [];
+  const observed = {};
+  const bridge = await initializeMcpBridge({
+    config: { servers: [{ url: "https://one.example/mcp", timeout_seconds: 12.5 }] },
+    env: {},
+    createClient: async () => fakeClient([tool("lookup")], {
+      listTools: async (timeoutSeconds) => {
+        observed.list = timeoutSeconds;
+        return [tool("lookup")];
+      },
+      callTool: async (name, args, signal, timeoutSeconds) => {
+        observed.call = timeoutSeconds;
+        return { content: [{ type: "text", text: "done" }] };
+      },
+    }),
+    registerTool: (value) => registered.push(value),
+  });
+
+  await registered[0].execute({}, new AbortController().signal);
+  assert.deepEqual(observed, { list: 12.5, call: 12.5 });
+  await bridge.close();
+});
+
 test("converts MCP text and image content to Pi tool content", () => {
   const result = mcpResultToPi({
     content: [
