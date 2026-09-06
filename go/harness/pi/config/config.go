@@ -1,6 +1,5 @@
 // Package config defines the versioned, non-secret Pi Harness runtime
-// configuration consumed by the Actor adapter. During the BYO prototype phase,
-// this configuration is derived from the compiler-owned ADK AgentConfig.
+// configuration shared by its compiler and Actor entrypoint.
 package config
 
 import (
@@ -9,23 +8,47 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/kagent-dev/kagent/go/api/adk"
 	"github.com/kagent-dev/kagent/go/api/agentplugin"
 )
 
 const (
-	Version                 = 1
-	PinnedPiVersion         = "0.85.0"
-	defaultOpenAIBaseURL    = "https://api.openai.com/v1"
-	defaultAnthropicBaseURL = "https://api.anthropic.com"
+	Version         = 1
+	PinnedPiVersion = "0.85.0"
+
+	PiHomeEnvName           = "PI_CODING_AGENT_DIR"
+	MCPConfigEnvName        = "KAGENT_PI_MCP_CONFIG"
+	OfflineEnvName          = "PI_OFFLINE"
+	SkipVersionCheckEnvName = "PI_SKIP_VERSION_CHECK"
+	TelemetryEnvName        = "PI_TELEMETRY"
+	OpenAIAPIKeyEnvName     = "OPENAI_API_KEY"
+	AnthropicAPIKeyEnvName  = "ANTHROPIC_API_KEY"
+	MCPCredentialEnvPrefix  = "KAGENT_PI_MCP_CREDENTIAL_"
 )
 
-// Config is the versioned, runtime-neutral Pi startup configuration.
-// Credential values remain in the process environment.
+var nativeNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// OwnsEnvironment reports whether the compiler or adapter reserves name for
+// Pi runtime configuration. Harness authors cannot override these values.
+func OwnsEnvironment(name string) bool {
+	if strings.HasPrefix(name, MCPCredentialEnvPrefix) {
+		return true
+	}
+	switch name {
+	case PiHomeEnvName, MCPConfigEnvName, OfflineEnvName, SkipVersionCheckEnvName,
+		TelemetryEnvName, OpenAIAPIKeyEnvName, AnthropicAPIKeyEnvName:
+		return true
+	default:
+		return false
+	}
+}
+
+// Config is compiler-owned input to the native Pi adapter. Credential values
+// are supplied only through the process environment.
 type Config struct {
 	Version              int                    `json:"version"`
 	PiExecutable         string                 `json:"pi_executable"`
@@ -51,14 +74,13 @@ type Provider struct {
 }
 
 // MCPServer is one compiler-owned direct Streamable HTTP MCP server. Name is
-// populated by the native Pi compiler; it remains empty for the temporary BYO
-// compatibility path where the generic AgentConfig no longer carries server identity.
+// the sanitized native namespace used in Pi tool names.
 type MCPServer struct {
-	Name           string            `json:"name,omitempty"`
+	Name           string            `json:"name"`
 	URL            string            `json:"url"`
 	Headers        map[string]string `json:"headers,omitempty"`
 	EnabledTools   []string          `json:"enabled_tools,omitempty"`
-	TimeoutSeconds float64           `json:"timeout_seconds,omitempty"`
+	TimeoutSeconds float64           `json:"timeout_seconds"`
 }
 
 // Production returns the pinned runtime defaults used by normal Actor launches.
@@ -70,8 +92,8 @@ func Production(provider Provider, model, systemPrompt string) Config {
 	}
 }
 
-// Parse decodes a future first-class Pi compiler payload using the same strict,
-// versioned boundary as the Codex and Claude adapters.
+// Parse decodes the native compiler payload using the same strict, versioned
+// boundary as the Codex and Claude adapters.
 func Parse(data []byte) (Config, error) {
 	var cfg Config
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -93,9 +115,8 @@ func Parse(data []byte) (Config, error) {
 	return cfg, nil
 }
 
-// Validate enforces the runtime contract independently of the outer Harness
-// compiler. This makes the BYO prototype ready to consume a typed Pi compiler
-// payload later without changing the Actor-side contract.
+// Validate enforces the compiler-to-Actor contract independently of the
+// controller so corrupted or stale revisions fail before Pi starts.
 func (c Config) Validate() error {
 	if c.Version != Version {
 		return fmt.Errorf("unsupported config version %d (want %d)", c.Version, Version)
@@ -117,15 +138,15 @@ func (c Config) Validate() error {
 		if c.Provider.API != "openai-completions" && c.Provider.API != "openai-responses" {
 			return fmt.Errorf("unsupported Pi OpenAI API %q", c.Provider.API)
 		}
-		if c.Provider.APIKeyEnv != "OPENAI_API_KEY" {
-			return fmt.Errorf("kagent-openai must use OPENAI_API_KEY")
+		if c.Provider.APIKeyEnv != OpenAIAPIKeyEnvName {
+			return fmt.Errorf("kagent-openai must use %s", OpenAIAPIKeyEnvName)
 		}
 	case "kagent-anthropic":
 		if c.Provider.API != "anthropic-messages" {
 			return fmt.Errorf("unsupported Pi Anthropic API %q", c.Provider.API)
 		}
-		if c.Provider.APIKeyEnv != "ANTHROPIC_API_KEY" {
-			return fmt.Errorf("kagent-anthropic must use ANTHROPIC_API_KEY")
+		if c.Provider.APIKeyEnv != AnthropicAPIKeyEnvName {
+			return fmt.Errorf("kagent-anthropic must use %s", AnthropicAPIKeyEnvName)
 		}
 	default:
 		return fmt.Errorf("unsupported Pi provider %q", c.Provider.Name)
@@ -136,218 +157,55 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// InterruptGrace returns the configured bounded shutdown grace period.
-func (c Config) InterruptGrace() time.Duration {
-	return time.Duration(c.InterruptGraceMillis) * time.Millisecond
-}
-
-// FromAgentConfig maps the currently supported BYO AgentConfig subset into the
-// same versioned Pi runtime config a future first-class compiler can emit.
-func FromAgentConfig(agent *adk.AgentConfig) (Config, error) {
-	if agent == nil || agent.Model == nil {
-		return Config{}, fmt.Errorf("Pi model is required")
-	}
-	if len(agent.SseTools) > 0 {
-		return Config{}, fmt.Errorf("Pi BYO prototype does not support SSE MCP yet")
-	}
-	if len(agent.StdioTools) > 0 {
-		return Config{}, fmt.Errorf("Pi BYO prototype does not support stdio MCP yet")
-	}
-	if len(agent.RemoteAgents) > 0 || len(agent.SubAgents) > 0 {
-		return Config{}, fmt.Errorf("Pi BYO prototype does not support agent tools yet")
-	}
-	if agent.Memory != nil || agent.ContextConfig != nil {
-		return Config{}, fmt.Errorf("Pi BYO prototype does not support kagent memory or context configuration yet")
-	}
-
-	var cfg Config
-	switch model := agent.Model.(type) {
-	case *adk.OpenAI:
-		if err := validateBaseModel(model.BaseModel); err != nil {
-			return Config{}, err
-		}
-		if err := validateOpenAITuning(model); err != nil {
-			return Config{}, err
-		}
-		baseURL := strings.TrimSpace(model.BaseUrl)
-		if baseURL == "" {
-			baseURL = defaultOpenAIBaseURL
-		}
-		if err := validateHTTPURL(baseURL); err != nil {
-			return Config{}, fmt.Errorf("OpenAI base URL: %w", err)
-		}
-		provider := Provider{Name: "kagent-openai", BaseURL: baseURL, APIKeyEnv: "OPENAI_API_KEY"}
-		switch strings.TrimSpace(model.APIFormat) {
-		case "", "chatCompletions":
-			provider.API = "openai-completions"
-		case "responses":
-			provider.API = "openai-responses"
-		default:
-			return Config{}, fmt.Errorf("Pi BYO prototype does not support OpenAI API format %q", model.APIFormat)
-		}
-		cfg = Production(provider, strings.TrimSpace(model.Model), agent.Instruction)
-	case *adk.Anthropic:
-		if err := validateBaseModel(model.BaseModel); err != nil {
-			return Config{}, err
-		}
-		if err := validateAnthropicTuning(model); err != nil {
-			return Config{}, err
-		}
-		baseURL := strings.TrimSpace(model.BaseUrl)
-		if baseURL == "" {
-			baseURL = defaultAnthropicBaseURL
-		}
-		if err := validateHTTPURL(baseURL); err != nil {
-			return Config{}, fmt.Errorf("Anthropic base URL: %w", err)
-		}
-		cfg = Production(Provider{
-			Name: "kagent-anthropic", BaseURL: baseURL, API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY",
-		}, strings.TrimSpace(model.Model), agent.Instruction)
-	default:
-		return Config{}, fmt.Errorf("Pi BYO prototype does not support model provider %q yet", agent.Model.GetType())
-	}
-
-	servers, err := compileMCPServers(agent.HttpTools)
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.MCPServers = servers
-	if agent.AgentPlugins != nil {
-		resources := *agent.AgentPlugins
-		cfg.SkillResources = &resources
-	}
-	if err := cfg.Validate(); err != nil {
-		return Config{}, err
-	}
-	return cfg, nil
-}
-
-func compileMCPServers(tools []adk.HttpMcpServerConfig) ([]MCPServer, error) {
-	servers := make([]MCPServer, 0, len(tools))
-	for _, tool := range tools {
-		if len(tool.AllowedHeaders) != 0 {
-			return nil, fmt.Errorf("Pi MCP tools do not support request header propagation yet")
-		}
-		if len(tool.RequireApproval) != 0 {
-			return nil, fmt.Errorf("Pi MCP approval is not supported yet")
-		}
-		params := tool.Params
-		if params.SseReadTimeout != nil {
-			return nil, fmt.Errorf("Pi MCP SSE read timeout is not supported for Streamable HTTP yet")
-		}
-		if params.TerminateOnClose != nil && !*params.TerminateOnClose {
-			return nil, fmt.Errorf("Pi MCP terminateOnClose=false is not supported yet")
-		}
-		if params.TLSInsecureSkipVerify != nil || params.TLSCACertPath != nil || params.TLSDisableSystemCAs != nil {
-			return nil, fmt.Errorf("Pi MCP custom TLS configuration is not supported yet")
-		}
-		timeoutSeconds := 0.0
-		if params.Timeout != nil {
-			if *params.Timeout <= 0 {
-				return nil, fmt.Errorf("Pi MCP timeout must be positive")
-			}
-			timeoutSeconds = *params.Timeout
-		}
-		url := strings.TrimSpace(params.Url)
-		if err := validateHTTPURL(url); err != nil {
-			return nil, fmt.Errorf("Pi MCP tools: MCP server %q URL %w", params.Url, err)
-		}
-		headers := make(map[string]string, len(params.Headers))
-		for name, value := range params.Headers {
-			if strings.TrimSpace(name) == "" {
-				return nil, fmt.Errorf("Pi MCP server %q has an empty header name", url)
-			}
-			headers[name] = value
-		}
-		selected := append([]string(nil), tool.Tools...)
-		for _, name := range selected {
-			if strings.TrimSpace(name) == "" {
-				return nil, fmt.Errorf("Pi MCP server %q has an empty enabled tool", url)
-			}
-		}
-		slices.Sort(selected)
-		selected = slices.Compact(selected)
-		servers = append(servers, MCPServer{
-			URL: url, Headers: headers, EnabledTools: selected, TimeoutSeconds: timeoutSeconds,
-		})
-	}
-	return normalizeMCPServers(servers)
-}
-
 func normalizeMCPServers(servers []MCPServer) ([]MCPServer, error) {
 	if len(servers) == 0 {
 		return nil, nil
 	}
 	result := make([]MCPServer, 0, len(servers))
-	named := map[string]struct{}{}
+	seenNames := make(map[string]struct{}, len(servers))
 	for _, server := range servers {
 		server.Name = strings.TrimSpace(server.Name)
-		if server.Name != "" {
-			if _, exists := named[server.Name]; exists {
-				return nil, fmt.Errorf("duplicate Pi MCP server name %q", server.Name)
-			}
-			named[server.Name] = struct{}{}
+		if !nativeNamePattern.MatchString(server.Name) {
+			return nil, fmt.Errorf("Pi MCP server name %q must contain only letters, numbers, underscores, or hyphens", server.Name)
 		}
+		if _, exists := seenNames[server.Name]; exists {
+			return nil, fmt.Errorf("duplicate Pi MCP server name %q", server.Name)
+		}
+		seenNames[server.Name] = struct{}{}
+
 		server.URL = strings.TrimSpace(server.URL)
 		if err := validateHTTPURL(server.URL); err != nil {
-			return nil, fmt.Errorf("invalid Pi MCP server %q URL: %w", server.URL, err)
+			return nil, fmt.Errorf("invalid Pi MCP server %q URL: %w", server.Name, err)
 		}
-		if server.TimeoutSeconds < 0 {
-			return nil, fmt.Errorf("Pi MCP server %q timeout must not be negative", server.URL)
+		if server.TimeoutSeconds <= 0 {
+			return nil, fmt.Errorf("Pi MCP server %q timeout must be positive", server.Name)
 		}
 		headers := make(map[string]string, len(server.Headers))
 		for name, value := range server.Headers {
 			if strings.TrimSpace(name) == "" {
-				return nil, fmt.Errorf("Pi MCP server %q has an empty header name", server.URL)
+				return nil, fmt.Errorf("Pi MCP server %q has an empty header name", server.Name)
 			}
 			headers[name] = value
 		}
 		server.Headers = headers
+
 		selected := append([]string(nil), server.EnabledTools...)
-		seen := make(map[string]struct{}, len(selected))
+		seenTools := make(map[string]struct{}, len(selected))
 		for _, tool := range selected {
 			if strings.TrimSpace(tool) == "" {
-				return nil, fmt.Errorf("Pi MCP server %q has an empty enabled tool", server.URL)
+				return nil, fmt.Errorf("Pi MCP server %q has an empty enabled tool", server.Name)
 			}
-			if _, exists := seen[tool]; exists {
-				return nil, fmt.Errorf("Pi MCP server %q has duplicate enabled tool %q", server.URL, tool)
+			if _, exists := seenTools[tool]; exists {
+				return nil, fmt.Errorf("Pi MCP server %q has duplicate enabled tool %q", server.Name, tool)
 			}
-			seen[tool] = struct{}{}
+			seenTools[tool] = struct{}{}
 		}
 		slices.Sort(selected)
 		server.EnabledTools = selected
 		result = append(result, server)
 	}
-	slices.SortFunc(result, func(a, b MCPServer) int {
-		return strings.Compare(mcpServerIdentity(a), mcpServerIdentity(b))
-	})
-	for i := 1; i < len(result); i++ {
-		if mcpServerIdentity(result[i-1]) == mcpServerIdentity(result[i]) {
-			return nil, fmt.Errorf("duplicate MCP server definition for %q", result[i].URL)
-		}
-	}
+	slices.SortFunc(result, func(a, b MCPServer) int { return strings.Compare(a.Name, b.Name) })
 	return result, nil
-}
-
-func mcpServerIdentity(server MCPServer) string {
-	raw, _ := json.Marshal(server)
-	return string(raw)
-}
-
-func validateOpenAITuning(model *adk.OpenAI) error {
-	if model.FrequencyPenalty != nil || model.MaxTokens != nil || model.MaxCompletionTokens != nil ||
-		model.N != nil || model.PresencePenalty != nil || model.ReasoningEffort != nil || model.Seed != nil ||
-		model.Temperature != nil || model.Timeout != nil || model.TopP != nil || model.TokenExchange != nil {
-		return fmt.Errorf("Pi BYO prototype does not support OpenAI model tuning yet")
-	}
-	return nil
-}
-
-func validateAnthropicTuning(model *adk.Anthropic) error {
-	if model.MaxTokens != nil || model.Temperature != nil || model.TopP != nil || model.TopK != nil || model.Timeout != nil {
-		return fmt.Errorf("Pi BYO prototype does not support Anthropic model tuning yet")
-	}
-	return nil
 }
 
 func validateHTTPURL(value string) error {
@@ -358,15 +216,7 @@ func validateHTTPURL(value string) error {
 	return nil
 }
 
-func validateBaseModel(model adk.BaseModel) error {
-	if model.APIKeyPassthrough {
-		return fmt.Errorf("Pi BYO prototype does not support API key passthrough yet")
-	}
-	if len(model.Headers) > 0 {
-		return fmt.Errorf("Pi BYO prototype does not support custom model headers yet")
-	}
-	if model.TLSInsecureSkipVerify != nil || model.TLSCACertPath != nil || model.TLSDisableSystemCAs != nil {
-		return fmt.Errorf("Pi BYO prototype does not support custom model TLS configuration yet")
-	}
-	return nil
+// InterruptGrace returns the configured bounded shutdown grace period.
+func (c Config) InterruptGrace() time.Duration {
+	return time.Duration(c.InterruptGraceMillis) * time.Millisecond
 }
