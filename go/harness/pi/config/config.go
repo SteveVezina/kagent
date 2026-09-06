@@ -50,10 +50,11 @@ type Provider struct {
 	APIKeyEnv string `json:"api_key_env"`
 }
 
-// MCPServer is one compiler-owned direct Streamable HTTP MCP server. The BYO
-// AgentConfig no longer carries the original RemoteMCPServer name, so this
-// prototype intentionally exposes selected MCP tool names without namespacing.
+// MCPServer is one compiler-owned direct Streamable HTTP MCP server. Name is
+// populated by the native Pi compiler; it remains empty for the temporary BYO
+// compatibility path where the generic AgentConfig no longer carries server identity.
 type MCPServer struct {
+	Name           string            `json:"name,omitempty"`
 	URL            string            `json:"url"`
 	Headers        map[string]string `json:"headers,omitempty"`
 	EnabledTools   []string          `json:"enabled_tools,omitempty"`
@@ -278,7 +279,15 @@ func normalizeMCPServers(servers []MCPServer) ([]MCPServer, error) {
 		return nil, nil
 	}
 	result := make([]MCPServer, 0, len(servers))
+	named := map[string]struct{}{}
 	for _, server := range servers {
+		server.Name = strings.TrimSpace(server.Name)
+		if server.Name != "" {
+			if _, exists := named[server.Name]; exists {
+				return nil, fmt.Errorf("duplicate Pi MCP server name %q", server.Name)
+			}
+			named[server.Name] = struct{}{}
+		}
 		server.URL = strings.TrimSpace(server.URL)
 		if err := validateHTTPURL(server.URL); err != nil {
 			return nil, fmt.Errorf("invalid Pi MCP server %q URL: %w", server.URL, err)
