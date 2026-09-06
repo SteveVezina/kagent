@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod,rw \
     go build -trimpath -o /kagent-pi ./harness/pi/cmd
 
 FROM node:24-alpine3.22
-ARG PI_CODING_AGENT_VERSION=0.85.0
+ARG PI_CODING_AGENT_VERSION=0.85.1
 ARG VERSION
 
 RUN apk add --no-cache bash ca-certificates git \
