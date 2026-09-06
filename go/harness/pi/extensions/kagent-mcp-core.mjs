@@ -138,7 +138,9 @@ function nativeToolName(server, toolName) {
   if (typeof server.name !== "string" || !NATIVE_NAME.test(server.name)) {
     throw new Error(`Pi MCP server ${server.url} has an invalid native name`);
   }
-  return `mcp__${server.name}__${toolName}`;
+  // Codex's native MCP tool surface converts hyphens in server namespaces to
+  // underscores even though its compiler preserves hyphens in the server key.
+  return `mcp__${server.name.replaceAll("-", "_")}__${toolName}`;
 }
 
 function expandServerHeaders(server, env) {
