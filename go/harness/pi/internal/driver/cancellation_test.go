@@ -28,7 +28,7 @@ func TestProcessDriverWaitsForPiAbortResponseOnCancellation(t *testing.T) {
 
 	script := `#!/bin/sh
 if [ "$1" = "--version" ]; then
-  echo "0.85.0"
+  echo "0.85.1"
   exit 0
 fi
 read state
@@ -48,7 +48,7 @@ sleep 5
 	}
 
 	driver := NewProcessDriver(ProcessConfig{
-		Executable: executable, ExpectedVersion: "0.85.0", StrictVersion: true,
+		Executable: executable, ExpectedVersion: "0.85.1", StrictVersion: true,
 		Workspace: workspace, SessionDir: sessions, Provider: "kagent-openai", Model: "gpt-5.4",
 		Environment: append(os.Environ(),
 			"READY="+ready,
