@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	a2atype "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
 	"github.com/kagent-dev/mockmcp"
 	corev1 "k8s.io/api/core/v1"
@@ -29,7 +30,7 @@ func TestE2EPiMockWholeServerMCP(t *testing.T) {
 	fixture := newInteractionFixtureForHarnessTemplate(t, target, piE2EHarness, template)
 
 	streamed := sendPiToolStreaming(t, fixture, "Add 3 and 5 using the configured MCP server.")
-	if streamed.state.String() != "COMPLETED" || !strings.Contains(streamed.text, "PI_MCP_DONE result is 8") {
+	if streamed.state != a2atype.TaskStateCompleted || !strings.Contains(streamed.text, "PI_MCP_DONE result is 8") {
 		t.Fatalf("Pi MCP task state = %s, text = %q, failure = %q", streamed.state, streamed.text, streamed.failureText)
 	}
 	assertPiMCPCallReachedServer(t, mcpMock.Requests())
@@ -71,7 +72,7 @@ func TestE2EPiMockSecretBackedMCPHeader(t *testing.T) {
 	fixture := newInteractionFixtureForHarnessTemplate(t, target, piE2EHarness, template)
 
 	streamed := sendPiToolStreaming(t, fixture, "Add 3 and 5 using the configured MCP server.")
-	if streamed.state.String() != "COMPLETED" || !strings.Contains(streamed.text, "PI_MCP_DONE result is 8") {
+	if streamed.state != a2atype.TaskStateCompleted || !strings.Contains(streamed.text, "PI_MCP_DONE result is 8") {
 		t.Fatalf("Pi secret-header MCP task state = %s, text = %q, failure = %q", streamed.state, streamed.text, streamed.failureText)
 	}
 	assertPiMCPCallReachedServer(t, mcpMock.Requests())
