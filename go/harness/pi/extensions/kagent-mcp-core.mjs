@@ -62,7 +62,7 @@ export async function initializeMcpBridge({ config, env, createClient, registerT
       const client = await createClient(server);
       clients.push(client);
 
-      const available = await client.listTools();
+      const available = await client.listTools(server.timeout_seconds);
       if (!Array.isArray(available)) {
         throw new Error(`MCP server ${server.url} returned an invalid tools/list result`);
       }
@@ -99,13 +99,15 @@ export async function initializeMcpBridge({ config, env, createClient, registerT
       }
     }
 
-    for (const { client, tool } of registrations) {
+    for (const { server, client, tool } of registrations) {
       registerTool({
         name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema,
         async execute(args, signal) {
-          const converted = mcpResultToPi(await client.callTool(tool.name, args, signal));
+          const converted = mcpResultToPi(
+            await client.callTool(tool.name, args, signal, server.timeout_seconds),
+          );
           if (converted.isError) {
             throw new Error(mcpErrorText(tool.name, converted));
           }
