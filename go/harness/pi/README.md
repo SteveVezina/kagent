@@ -31,7 +31,7 @@ configuration directly without changing the Actor-side driver contract.
 
 ## Implemented support
 
-- Pi Coding Agent `0.85.0`, pinned to the currently published npm package and
+- Pi Coding Agent `0.85.1`, pinned to the currently published npm package and
   validated at image build and Actor startup.
 - OpenAI and Anthropic through Secret-backed environment credentials resolved by
   kagent's existing BYO compiler.
