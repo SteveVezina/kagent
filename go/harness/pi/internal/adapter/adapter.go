@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kagent-dev/kagent/go/api/adk"
+	"github.com/kagent-dev/kagent/go/api/agentplugin"
 	"github.com/kagent-dev/kagent/go/core/pkg/agentplugins"
 	"github.com/kagent-dev/kagent/go/harness/internal/utils"
 	"github.com/kagent-dev/kagent/go/harness/pi/config"
@@ -152,11 +153,15 @@ func writeMCPConfig(path string, servers []config.MCPServer) error {
 	return nil
 }
 
-func hasSelectedSkills(resources interface {
-}) bool {
-	value, ok := resources.(struct{})
-	_ = value
-	_ = ok
+func hasSelectedSkills(resources agentplugin.Resources) bool {
+	if len(resources.Skills) != 0 {
+		return true
+	}
+	for _, bundle := range resources.Plugins {
+		if len(bundle.Skills) != 0 {
+			return true
+		}
+	}
 	return false
 }
 
