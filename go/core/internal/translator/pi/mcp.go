@@ -92,6 +92,9 @@ func (c *Compiler) compileMCP(ctx context.Context, namespace string, tools []v2t
 		result.environment = append(result.environment, environment...)
 		result.egress = append(result.egress, host)
 	}
+	slices.SortFunc(result.servers, func(a, b piconfig.MCPServer) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 	return result, nil
 }
 
