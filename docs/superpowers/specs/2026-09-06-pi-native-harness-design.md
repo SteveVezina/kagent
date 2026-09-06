@@ -4,7 +4,7 @@
 
 Promote the Pi runtime proven by `feat/pi-harness` from the generic BYO compiler path to a first-class `kagent.dev/v1alpha3` Harness runtime.
 
-This change is intentionally stacked on the Pi runtime PR. The base PR owns the Actor-side Pi runtime, image, RPC lifecycle, skills, MCP bridge, resume, checkpoint/fork behavior, cancellation, and E2E infrastructure. This PR owns only the public `spec.pi` API and the controller-side native compilation path required to feed that runtime directly.
+This change is intentionally stacked on the Pi runtime PR. The base PR owns the Actor-side Pi runtime, image, RPC lifecycle, skills, MCP bridge, resume, checkpoint/fork behavior, cancellation, and E2E infrastructure. This PR owns the public `spec.pi` API, the controller-side native compilation path, and the minimal Pi config/adapter changes required to consume that native compiler output directly.
 
 The end state mirrors the existing Codex and Claude Harness architecture:
 
@@ -148,7 +148,7 @@ Unsupported public configuration must fail with `translator.NewValidationError` 
 
 ### Provider support
 
-The first native Pi compiler supports exactly the providers already proven by PR1:
+The first native Pi compiler supports exactly the providers already proven by PR1.
 
 #### OpenAI
 
@@ -207,7 +207,7 @@ The Pi compiler owns at least:
 - `ANTHROPIC_API_KEY`
 - the `KAGENT_PI_MCP_CREDENTIAL_` prefix used for generated MCP credential environment variables
 
-The exact Pi-home and offline/telemetry variables remain Actor/runtime implementation details unless they must be injected by the controller.
+The Pi home plus offline/telemetry variables remain Actor/runtime-owned and are not accepted as controller-generated provider configuration.
 
 If `Harness.spec.env` attempts to override a compiler-owned name or prefix, compilation fails with a validation error.
 
@@ -219,9 +219,9 @@ Use the shared `translator.CompileSkillResources(root.Template)` helper, matchin
 
 The resulting `agentplugin.Resources` is attached directly to the versioned Pi config. Skill/package egress from the helper is added to the revision egress set.
 
-The runtime continues to disable ambient Pi skill discovery and explicitly loads only compiler-owned materialized skills.
+For `AgentTemplate.spec.plugins`, Pi consumes only the explicitly selected `skills` represented by that shared resource contract. Plugin hooks, commands, executables, and implicit plugin MCP servers are not compiled or executed by the Pi Harness.
 
-Plugin hooks, commands, executables, and implicit plugin MCP servers remain unsupported unless the shared skill compiler already strips them into the existing skill-only resource contract. No new plugin execution surface is introduced.
+The runtime continues to disable ambient Pi skill discovery and explicitly loads only compiler-owned materialized skills.
 
 ## Native MCP compilation
 
@@ -259,7 +259,7 @@ It rejects:
 
 Secret-backed header values are represented in Pi config as environment references, never plaintext Secret values.
 
-Generated environment names use a deterministic reserved prefix, for example:
+Generated environment names use the deterministic reserved prefix:
 
 ```text
 KAGENT_PI_MCP_CREDENTIAL_<hash>
@@ -269,15 +269,15 @@ The compiler validates referenced ConfigMaps/Secrets and keys using the same con
 
 ### Tool names
 
-The Pi extension registers every discovered selected tool under:
+The compiler preserves the Kubernetes `RemoteMCPServer` name in Pi config. The Pi extension derives the native namespace using the Codex convention of replacing `-` with `_` in the server name, then registers each tool as:
 
 ```text
-mcp__<sanitized-server-name>__<tool-name>
+mcp__<server-name-with-hyphens-replaced-by-underscores>__<tool-name>
 ```
 
 The underlying MCP `tools/call` request still uses the original MCP tool name.
 
-This removes the PR1 BYO collision restriction and matches the namespace model used by the other native integrations. Duplicate final native names are rejected deterministically before or during extension initialization.
+This removes the PR1 BYO collision restriction. Duplicate final native names are rejected deterministically during extension initialization.
 
 ## Runtime config boundary
 
@@ -295,7 +295,7 @@ The native path no longer performs:
 ADK AgentConfig -> piconfig.FromAgentConfig
 ```
 
-`FromAgentConfig` and BYO-specific validation helpers may be removed if no tests or supported compatibility path still require them. Avoid retaining dead BYO-only code in the final native implementation solely for historical compatibility.
+PR2 removes `FromAgentConfig`, the BYO-only provider/MCP conversion helpers, and their BYO-specific unit tests after equivalent native compiler tests are in place. The final Pi runtime has one configuration contract, matching Codex and Claude.
 
 The Actor remains responsible for runtime-only validation such as pinned Pi executable/version, filesystem ownership, compiler-owned resource paths, and process lifecycle.
 
@@ -315,19 +315,20 @@ No public network endpoint is encoded into the card.
 
 Pi gets native revision provenance rather than BYO provenance.
 
-At minimum provenance must cover:
+At minimum provenance covers:
 
 - Harness,
 - root AgentTemplate,
 - ModelConfig,
 - generated Pi config,
 - generated AgentCard,
-- referenced credential Secrets/keys,
+- referenced provider credential Secrets/keys,
 - MCP RemoteMCPServers,
-- MCP header ConfigMaps/Secrets/keys,
-- skill/plugin source objects and resolved resource inputs covered by the shared skill machinery.
+- MCP header ConfigMaps/Secrets/keys.
 
-Follow the existing Codex/Claude provenance ordering and hashing conventions wherever possible rather than creating a Pi-specific provenance format.
+Skill/plugin source definitions are already part of the AgentTemplate spec and therefore covered by AgentTemplate provenance. No separate synthetic provenance object is added solely for those embedded source fields.
+
+Follow the existing Codex/Claude provenance ordering and hashing conventions rather than creating a Pi-specific provenance format.
 
 ## Revision output
 
@@ -341,10 +342,11 @@ The Pi compiler returns a normal `translator.CompileResult` with:
 - worker pool,
 - snapshot location,
 - provenance,
-- deduplicated/sorted egress destinations,
-- MCP warnings where applicable.
+- deduplicated/sorted egress destinations.
 
-The output shape should be indistinguishable from the other native compilers to downstream reconciliation code.
+Unsupported semantics are compilation errors; the first native Pi compiler does not introduce a Pi-specific warning class.
+
+The output shape is otherwise indistinguishable from the other native compilers to downstream reconciliation code.
 
 ## E2E migration
 
@@ -379,7 +381,7 @@ The tests must no longer pass merely because generic BYO compilation works.
 
 ## API and compiler tests
 
-Test-first coverage should include:
+Test-first coverage includes:
 
 1. CRD/CEL accepts exactly one `pi` runtime and rejects `pi` combined with any other runtime.
 2. Deepcopy preserves `HarnessSpec.Pi`.
@@ -410,7 +412,7 @@ Expected generated/API files include at least:
 - `go/api/config/crd/bases/kagent.dev_harnesses.yaml`
 - `helm/kagent-crds/templates/kagent.dev_harnesses.yaml`
 
-Use repository generation commands when a runnable checkout is available and verify generated-output drift is zero. If generation cannot run in the current connector-only environment, do not claim generated artifacts are authoritative until CI or a real checkout verifies them.
+Use the repository generation command that owns these outputs when a runnable checkout is available and verify generated-output drift is zero. If generation cannot run in the current connector-only environment, do not claim generated artifacts are authoritative until CI or a real checkout verifies them.
 
 ## Pull request boundaries
 
