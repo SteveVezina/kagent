@@ -95,19 +95,11 @@ func (d *ProcessDriver) Run(ctx context.Context, turn runtime.Turn, sink runtime
 	}
 	wait := make(chan error, 1)
 	go func() { wait <- command.Wait(); close(wait) }()
-	grace := d.config.InterruptGrace
-	if grace <= 0 {
-		grace = 2 * time.Second
-	}
+	grace := d.interruptGrace()
 	defer func() {
 		_ = stdin.Close()
 		_ = utils.TerminateProcessGroup(command.Process)
-		select {
-		case <-wait:
-		case <-time.After(grace):
-			_ = utils.KillProcessGroup(command.Process)
-			<-wait
-		}
+		waitForProcess(command, wait, grace)
 	}()
 
 	client := newRPCClient(stdin, stdout, d.config.MaxLineBytes)
@@ -227,8 +219,15 @@ func (d *ProcessDriver) consume(ctx context.Context, client *rpcClient, command 
 	for {
 		select {
 		case <-ctx.Done():
-			_ = client.send(map[string]any{"id": "abort", "type": "abort"})
-			_ = utils.TerminateProcessGroup(command.Process)
+			abortCtx, cancel := context.WithTimeout(context.Background(), d.interruptGrace())
+			err := d.abortAndWait(abortCtx, client, wait, stderr)
+			cancel()
+			if err != nil {
+				_ = utils.KillProcessGroup(command.Process)
+			} else {
+				_ = utils.TerminateProcessGroup(command.Process)
+			}
+			waitForProcess(command, wait, d.interruptGrace())
 			return runtime.Outcome{}, ctx.Err()
 		case waitErr := <-wait:
 			return runtime.Outcome{}, d.exitError(waitErr, stderr)
@@ -266,6 +265,57 @@ func (d *ProcessDriver) consume(ctx context.Context, client *rpcClient, command 
 				return outcome, nil
 			}
 		}
+	}
+}
+
+func (d *ProcessDriver) abortAndWait(ctx context.Context, client *rpcClient, wait <-chan error, stderr *utils.BoundedBuffer) error {
+	if err := client.send(map[string]any{"id": "abort", "type": "abort"}); err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case waitErr := <-wait:
+			return d.exitError(waitErr, stderr)
+		case frame, ok := <-client.frames:
+			if !ok {
+				return fmt.Errorf("Pi RPC stream closed before abort response")
+			}
+			if frame.err != nil {
+				return frame.err
+			}
+			var response responseEnvelope
+			if err := json.Unmarshal(frame.raw, &response); err != nil {
+				return fmt.Errorf("decode Pi RPC abort response: %w", err)
+			}
+			if response.Type != "response" || response.ID != "abort" {
+				continue
+			}
+			if response.Command != "abort" {
+				return fmt.Errorf("Pi RPC abort response has command %q", response.Command)
+			}
+			if !response.Success {
+				return fmt.Errorf("Pi abort failed: %s", response.Error)
+			}
+			return nil
+		}
+	}
+}
+
+func (d *ProcessDriver) interruptGrace() time.Duration {
+	if d.config.InterruptGrace > 0 {
+		return d.config.InterruptGrace
+	}
+	return 2 * time.Second
+}
+
+func waitForProcess(command *exec.Cmd, wait <-chan error, grace time.Duration) {
+	select {
+	case <-wait:
+	case <-time.After(grace):
+		_ = utils.KillProcessGroup(command.Process)
+		<-wait
 	}
 }
 
