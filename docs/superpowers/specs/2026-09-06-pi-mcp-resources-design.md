@@ -63,7 +63,7 @@ AgentTemplate
        /data/pi/mcp.json
             |
             v
-       bundled kagent Pi MCP extension
+       /usr/local/lib/kagent-pi/extensions/kagent-mcp.ts
             |
             +-- connect Streamable HTTP
             +-- expand environment-backed headers
@@ -73,7 +73,7 @@ AgentTemplate
             +-- pi.registerTool(...)
 ```
 
-The bundled MCP extension is part of the Pi Harness image and is loaded explicitly with Pi's `-e` flag. Ambient extension discovery remains disabled.
+The bundled MCP extension is part of the Pi Harness image at `/usr/local/lib/kagent-pi/extensions/kagent-mcp.ts` and is loaded explicitly with Pi's `-e` flag. Ambient extension discovery remains disabled.
 
 ## Versioned Runtime Configuration
 
@@ -131,7 +131,7 @@ At Pi startup, the bundled extension performs the following sequence for every c
 2. Connect using MCP Streamable HTTP transport.
 3. Call `tools/list`.
 4. If `EnabledTools` is non-empty, retain only those exact tool names and fail startup if any requested tool is absent.
-5. Convert each MCP JSON Schema into a Pi-compatible TypeBox schema without changing the schema semantics.
+5. Wrap each MCP `inputSchema` with TypeBox `Type.Unsafe(inputSchema)` so the original JSON Schema is preserved rather than reconstructed or weakened.
 6. Register each tool through `pi.registerTool()`.
 7. On execution, call the corresponding MCP `tools/call` operation and convert MCP content into Pi tool-result content.
 8. Close MCP clients during Pi session shutdown.
@@ -161,13 +161,13 @@ The adapter creates and reconciles compiler-owned directories under:
 
 The current compiled `SkillResources` is materialized into those paths. Stale compiler-owned skills are removed when the runtime revision changes.
 
-Pi continues to start with ambient skills disabled. The driver explicitly supplies the materialized compiler-owned skill paths with `--skill` arguments. No workspace `.pi` or global skill directory participates in discovery.
+Pi continues to start with ambient skills disabled. The driver explicitly supplies each materialized compiler-owned skill path with a `--skill <path>` argument. No workspace `.pi` or global skill directory participates in discovery.
 
 If materialization fails, the Actor fails readiness rather than starting without the requested skills.
 
 ## Generated Extension and Configuration
 
-The Harness image contains a static extension source at a fixed image path such as:
+The Harness image contains the static extension source at exactly:
 
 ```text
 /usr/local/lib/kagent-pi/extensions/kagent-mcp.ts
@@ -197,9 +197,9 @@ The extension file itself is immutable image content. Only `mcp.json` is revisio
 
 ## Runtime Dependencies
 
-The Pi Harness image adds a pinned MCP SDK dependency compatible with the Pi 0.85.0 runtime. The dependency is installed during image build and must be exact-version pinned in the image build rather than dynamically installed at Actor startup.
+The Pi Harness image installs `@modelcontextprotocol/sdk@1.25.2`, matching Pi 0.85.0's MCP SDK compatibility range, as an exact pinned image dependency.
 
-No npm or network package installation is allowed during Actor startup.
+The dependency is installed during image build. No npm or network package installation is allowed during Actor startup.
 
 ## Security and Isolation
 
@@ -282,7 +282,7 @@ Use a local test MCP server to prove:
 - selected-tool filtering is exact;
 - missing selected tools fail initialization;
 - duplicate names across servers fail initialization;
-- MCP JSON Schema is passed to the registered Pi tool without semantic weakening;
+- MCP JSON Schema is passed to the registered Pi tool with `Type.Unsafe` without semantic reconstruction;
 - `tools/call` results and errors are converted into valid Pi tool results;
 - cancellation aborts an in-flight MCP call.
 
