@@ -41,7 +41,10 @@ func (c *Compiler) compileMCP(ctx context.Context, namespace string, tools []v2t
 			return mcpCompilation{}, v2translator.NewValidationError("RemoteMCPServer %q is bound more than once", server.Name)
 		}
 		seenServers[server.Name] = struct{}{}
-		nativeName := strings.ReplaceAll(server.Name, "-", "_")
+
+		// Kubernetes object names may contain dots, while native tool names may not.
+		// Codex and Claude use the same dot-to-underscore normalization.
+		nativeName := strings.ReplaceAll(server.Name, ".", "_")
 		if previous, exists := nativeNames[nativeName]; exists {
 			return mcpCompilation{}, v2translator.NewValidationError("Pi MCP servers %q and %q map to the same native namespace %q", previous, server.Name, nativeName)
 		}
@@ -84,7 +87,7 @@ func (c *Compiler) compileMCP(ctx context.Context, namespace string, tools []v2t
 		slices.Sort(selected)
 		selected = slices.Compact(selected)
 		result.servers = append(result.servers, piconfig.MCPServer{
-			Name: server.Name, URL: server.Spec.URL, Headers: headers, EnabledTools: selected, TimeoutSeconds: timeout.Seconds(),
+			Name: nativeName, URL: server.Spec.URL, Headers: headers, EnabledTools: selected, TimeoutSeconds: timeout.Seconds(),
 		})
 		result.environment = append(result.environment, environment...)
 		result.egress = append(result.egress, host)
@@ -127,7 +130,7 @@ func (c *Compiler) compileMCPHeaders(ctx context.Context, namespace string, refs
 				return nil, nil, v2translator.NewValidationError("Pi MCP credential Secret %q does not contain a non-empty key %q", ref.ValueFrom.Name, ref.ValueFrom.Key)
 			}
 			sum := sha256.Sum256([]byte(namespace + "\x00" + ref.ValueFrom.Name + "\x00" + ref.ValueFrom.Key))
-			name := mcpCredentialPrefix + strings.ToUpper(fmt.Sprintf("%x", sum[:8]))
+			name := piconfig.MCPCredentialEnvPrefix + strings.ToUpper(fmt.Sprintf("%x", sum[:8]))
 			headers[ref.Name] = "__KAGENT_ENV[" + name + "]__"
 			environment = append(environment, secretEnvironment(name, ref.ValueFrom.Name, ref.ValueFrom.Key))
 		default:
