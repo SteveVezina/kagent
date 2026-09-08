@@ -1,0 +1,9 @@
+{
+  "name": "kagent-pi-mcp-extension",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.25.2",
+    "typebox": "1.3.7"
+  }
+}
