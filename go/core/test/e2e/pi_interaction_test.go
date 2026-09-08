@@ -31,7 +31,7 @@ var piInteractionMocks embed.FS
 // TestE2EPiMockInteractionResume verifies the same public streaming,
 // persistence, and continuation path exercised by the native Codex and Claude
 // Harness adapters, while Pi is selected through the existing BYO Harness type
-// during the prototype phase.
+// during the runtime-foundation phase.
 func TestE2EPiMockInteractionResume(t *testing.T) {
 	target := interactionTarget(t)
 	modelURL := reachableModelURL(t, startMockLLMServer(t, piInteractionMocks, "mocks/invoke_pi_agent.json"))
@@ -74,7 +74,7 @@ func TestE2EPiMockCheckpointForkAndResume(t *testing.T) {
 	}
 
 	created, err := fixture.checkpoints.CreateCheckpoint(fixture.ctx, &apiv1alpha1.CreateCheckpointRequest{
-		Namespace: "kagent", AgentInstanceId: fixture.instanceID, RequestId: uuid.NewString(),
+		AgentInstanceId: fixture.instanceID, RequestId: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatalf("create Pi checkpoint: %v", err)
@@ -84,7 +84,7 @@ func TestE2EPiMockCheckpointForkAndResume(t *testing.T) {
 		ctx, cancel := context.WithTimeout(metadata.AppendToOutgoingContext(context.Background(), "x-user-id", "e2e"), time.Minute)
 		defer cancel()
 		_, cleanupErr := fixture.checkpoints.DeleteCheckpoint(ctx, &apiv1alpha1.DeleteCheckpointRequest{
-			Namespace: "kagent", CheckpointId: checkpointID,
+			CheckpointId: checkpointID,
 		})
 		if cleanupErr != nil && status.Code(cleanupErr) != codes.NotFound {
 			t.Errorf("delete Pi checkpoint: %v", cleanupErr)
@@ -92,7 +92,7 @@ func TestE2EPiMockCheckpointForkAndResume(t *testing.T) {
 	})
 
 	forked, err := fixture.checkpoints.ForkAgentInstance(fixture.ctx, &apiv1alpha1.ForkAgentInstanceRequest{
-		Namespace: "kagent", CheckpointId: checkpointID, RequestId: uuid.NewString(),
+		CheckpointId: checkpointID, RequestId: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatalf("fork Pi AgentInstance: %v", err)
@@ -106,7 +106,7 @@ func TestE2EPiMockCheckpointForkAndResume(t *testing.T) {
 		ctx, cancel := context.WithTimeout(metadata.AppendToOutgoingContext(context.Background(), "x-user-id", "e2e"), time.Minute)
 		defer cancel()
 		_, cleanupErr := fixture.instances.DeleteAgentInstance(ctx, &apiv1alpha1.DeleteAgentInstanceRequest{
-			Namespace: "kagent", AgentInstanceId: forkID,
+			AgentInstanceId: forkID,
 		})
 		if cleanupErr != nil && status.Code(cleanupErr) != codes.NotFound {
 			t.Errorf("delete forked Pi AgentInstance: %v", cleanupErr)
@@ -115,7 +115,6 @@ func TestE2EPiMockCheckpointForkAndResume(t *testing.T) {
 
 	forkCtx, forkCancel := context.WithTimeout(metadata.AppendToOutgoingContext(t.Context(),
 		"x-user-id", "e2e",
-		"x-kagent-agent-instance-namespace", "kagent",
 		"x-kagent-agent-instance-id", forkID,
 	), 4*time.Minute)
 	t.Cleanup(forkCancel)
