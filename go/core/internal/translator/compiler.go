@@ -29,6 +29,7 @@ const (
 	HarnessTypeKagent HarnessType = "kagent"
 	HarnessTypeCodex  HarnessType = "codex"
 	HarnessTypeClaude HarnessType = "claude"
+	HarnessTypePi     HarnessType = "pi"
 	HarnessTypeBYO    HarnessType = "byo"
 )
 
@@ -117,6 +118,8 @@ func harnessType(harness *v1alpha3.Harness) HarnessType {
 		return HarnessTypeCodex
 	case harness.Spec.Claude != nil:
 		return HarnessTypeClaude
+	case harness.Spec.Pi != nil:
+		return HarnessTypePi
 	case harness.Spec.BYO != nil:
 		return HarnessTypeBYO
 	default:

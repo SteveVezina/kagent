@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	piconfig "github.com/kagent-dev/kagent/go/harness/pi/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,12 +15,9 @@ func TestNewPreparesPrivatePiState(t *testing.T) {
 	directory := t.TempDir()
 	workspace := filepath.Join(directory, "workspace")
 	durable := filepath.Join(directory, "data")
-	configJSON := []byte(`{
-		"model":{"type":"openai","model":"gpt-5.4"},
-		"description":"",
-		"instruction":"help",
-		"stream":true
-	}`)
+	configJSON := nativeConfigJSON(t, piconfig.Provider{
+		Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY",
+	}, "gpt-5.4", "help")
 
 	runner, err := New(context.Background(), Input{
 		ConfigJSON: configJSON, Workspace: workspace, DurableDir: durable, Environment: os.Environ(),
@@ -38,12 +36,9 @@ func TestNewMaterializesCompilerOwnedOpenAIGateway(t *testing.T) {
 	directory := t.TempDir()
 	workspace := filepath.Join(directory, "workspace")
 	durable := filepath.Join(directory, "data")
-	configJSON := []byte(`{
-		"model":{"type":"openai","model":"gpt-4.1-mini","base_url":"http://mock-llm:8080/v1","api_format":"chatCompletions"},
-		"description":"",
-		"instruction":"reply briefly",
-		"stream":true
-	}`)
+	configJSON := nativeConfigJSON(t, piconfig.Provider{
+		Name: "kagent-openai", BaseURL: "http://mock-llm:8080/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY",
+	}, "gpt-4.1-mini", "reply briefly")
 
 	runner, err := New(context.Background(), Input{
 		ConfigJSON: configJSON, Workspace: workspace, DurableDir: durable, Environment: append(os.Environ(), "OPENAI_API_KEY=fake"),
@@ -63,12 +58,9 @@ func TestNewMaterializesCompilerOwnedAnthropicGateway(t *testing.T) {
 	directory := t.TempDir()
 	workspace := filepath.Join(directory, "workspace")
 	durable := filepath.Join(directory, "data")
-	configJSON := []byte(`{
-		"model":{"type":"anthropic","model":"claude-custom","base_url":"https://gateway.example.com/anthropic"},
-		"description":"",
-		"instruction":"reply briefly",
-		"stream":true
-	}`)
+	configJSON := nativeConfigJSON(t, piconfig.Provider{
+		Name: "kagent-anthropic", BaseURL: "https://gateway.example.com/anthropic", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY",
+	}, "claude-custom", "reply briefly")
 
 	runner, err := New(context.Background(), Input{
 		ConfigJSON: configJSON, Workspace: workspace, DurableDir: durable, Environment: append(os.Environ(), "ANTHROPIC_API_KEY=fake"),
@@ -84,13 +76,34 @@ func TestNewMaterializesCompilerOwnedAnthropicGateway(t *testing.T) {
 	require.Equal(t, "claude-custom", model["id"])
 }
 
-func TestNewRejectsRelativeActorPaths(t *testing.T) {
-	_, err := New(context.Background(), Input{
-		ConfigJSON: []byte(`{"model":{"type":"anthropic","model":"claude-sonnet-4-5"},"description":"","instruction":"help"}`),
-		Workspace: "workspace", DurableDir: "data",
-	})
+func TestNewRejectsUnknownNativeConfigField(t *testing.T) {
+	cfg := piconfig.Production(piconfig.Provider{
+		Name: "kagent-openai", BaseURL: "https://api.openai.com/v1", API: "openai-completions", APIKeyEnv: "OPENAI_API_KEY",
+	}, "gpt-5.4", "help")
+	contents, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	contents[len(contents)-1] = ','
+	contents = append(contents, []byte(`"unexpected":true}`)...)
 
+	_, err = New(context.Background(), Input{
+		ConfigJSON: contents, Workspace: filepath.Join(t.TempDir(), "workspace"), DurableDir: filepath.Join(t.TempDir(), "data"),
+	})
+	require.ErrorContains(t, err, "unknown field")
+}
+
+func TestNewRejectsRelativeActorPaths(t *testing.T) {
+	configJSON := nativeConfigJSON(t, piconfig.Provider{
+		Name: "kagent-anthropic", BaseURL: "https://api.anthropic.com", API: "anthropic-messages", APIKeyEnv: "ANTHROPIC_API_KEY",
+	}, "claude-sonnet-4-5", "help")
+	_, err := New(context.Background(), Input{ConfigJSON: configJSON, Workspace: "workspace", DurableDir: "data"})
 	require.ErrorContains(t, err, "absolute paths")
+}
+
+func nativeConfigJSON(t *testing.T, provider piconfig.Provider, model, prompt string) []byte {
+	t.Helper()
+	contents, err := json.Marshal(piconfig.Production(provider, model, prompt))
+	require.NoError(t, err)
+	return contents
 }
 
 func readMaterializedProvider(t *testing.T, durable, providerName string) map[string]any {

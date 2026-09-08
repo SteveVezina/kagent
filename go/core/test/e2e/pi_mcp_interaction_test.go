@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	a2atype "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/kagent-dev/kagent/go/api/v1alpha3"
+	"github.com/kagent-dev/mockllm"
 	"github.com/kagent-dev/mockmcp"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,7 +26,8 @@ func TestE2EPiMockWholeServerMCP(t *testing.T) {
 	mcpURL, mcpMock := startMCPMock(t)
 	kube := interactionKubeClient(t)
 	mcpServer := createPiMCPServer(t, kube, mcpURL, nil)
-	modelURL := reachableModelURL(t, startMockLLMServer(t, piMCPMocks, "mocks/invoke_pi_mcp.json"))
+	toolName := piMCPToolName(mcpServer.Name, "add_numbers")
+	modelURL := startPiMCPMockLLM(t, toolName)
 	model := createPiMockModel(t, kube, modelURL)
 	template := createPiMCPTemplate(t, kube, model.Name, mcpServer.Name)
 	fixture := newInteractionFixtureForHarnessTemplate(t, target, piE2EHarness, template)
@@ -34,8 +37,8 @@ func TestE2EPiMockWholeServerMCP(t *testing.T) {
 		t.Fatalf("Pi MCP task state = %s, text = %q, failure = %q", streamed.state, streamed.text, streamed.failureText)
 	}
 	assertPiMCPCallReachedServer(t, mcpMock.Requests())
-	assertPiToolEvents(t, streamed.toolEvents, "add_numbers")
-	assertPiToolEvents(t, piTaskToolEvents(getPiTask(t, fixture, streamed.taskID)), "add_numbers")
+	assertPiToolEvents(t, streamed.toolEvents, toolName)
+	assertPiToolEvents(t, piTaskToolEvents(getPiTask(t, fixture, streamed.taskID)), toolName)
 }
 
 func TestE2EPiMockSecretBackedMCPHeader(t *testing.T) {
@@ -66,7 +69,8 @@ func TestE2EPiMockSecretBackedMCPHeader(t *testing.T) {
 		},
 	}}
 	mcpServer := createPiMCPServer(t, kube, mcpURL, headers)
-	modelURL := reachableModelURL(t, startMockLLMServer(t, piMCPMocks, "mocks/invoke_pi_mcp.json"))
+	toolName := piMCPToolName(mcpServer.Name, "add_numbers")
+	modelURL := startPiMCPMockLLM(t, toolName)
 	model := createPiMockModel(t, kube, modelURL)
 	template := createPiMCPTemplate(t, kube, model.Name, mcpServer.Name)
 	fixture := newInteractionFixtureForHarnessTemplate(t, target, piE2EHarness, template)
@@ -77,7 +81,26 @@ func TestE2EPiMockSecretBackedMCPHeader(t *testing.T) {
 	}
 	assertPiMCPCallReachedServer(t, mcpMock.Requests())
 	assertPiMCPHeader(t, mcpMock.Requests(), "Authorization", secretHeader)
-	assertPiToolEvents(t, streamed.toolEvents, "add_numbers")
+	assertPiToolEvents(t, streamed.toolEvents, toolName)
+}
+
+func startPiMCPMockLLM(t *testing.T, toolName string) string {
+	t.Helper()
+	raw, err := piMCPMocks.ReadFile("mocks/invoke_pi_mcp.json")
+	if err != nil {
+		t.Fatalf("read Pi MCP mock fixture: %v", err)
+	}
+	raw = bytes.ReplaceAll(raw, []byte("PI_MCP_TOOL_NAME"), []byte(toolName))
+	var cfg mockllm.Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("decode Pi MCP mock fixture: %v", err)
+	}
+	return reachableModelURL(t, startMockLLMConfig(t, cfg))
+}
+
+func piMCPToolName(serverName, toolName string) string {
+	namespace := strings.NewReplacer(".", "_", "-", "_").Replace(serverName)
+	return "mcp__" + namespace + "__" + toolName
 }
 
 func createPiMCPServer(t *testing.T, kube ctrlclient.Client, mcpURL string, headers []v1alpha3.ValueRef) *v1alpha3.RemoteMCPServer {

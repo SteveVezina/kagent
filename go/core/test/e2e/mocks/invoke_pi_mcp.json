@@ -25,7 +25,7 @@
                   "id": "call_pi_mcp_add",
                   "type": "function",
                   "function": {
-                    "name": "add_numbers",
+                    "name": "PI_MCP_TOOL_NAME",
                     "arguments": "{\"a\":3,\"b\":5}"
                   }
                 }

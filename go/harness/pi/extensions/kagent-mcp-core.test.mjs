@@ -9,8 +9,8 @@ import {
 
 test("expands compiler-owned environment header marker", () => {
   assert.equal(
-    expandHeaderValue("__KAGENT_ENV[KAGENT_CREDENTIAL_0123ABCD]__", {
-      KAGENT_CREDENTIAL_0123ABCD: "secret",
+    expandHeaderValue("__KAGENT_ENV[KAGENT_PI_MCP_CREDENTIAL_0123ABCD]__", {
+      KAGENT_PI_MCP_CREDENTIAL_0123ABCD: "secret",
     }),
     "secret",
   );
@@ -19,8 +19,8 @@ test("expands compiler-owned environment header marker", () => {
 
 test("rejects missing environment header", () => {
   assert.throws(
-    () => expandHeaderValue("__KAGENT_ENV[KAGENT_CREDENTIAL_0123ABCD]__", {}),
-    /KAGENT_CREDENTIAL_0123ABCD/,
+    () => expandHeaderValue("__KAGENT_ENV[KAGENT_PI_MCP_CREDENTIAL_0123ABCD]__", {}),
+    /KAGENT_PI_MCP_CREDENTIAL_0123ABCD/,
   );
 });
 
@@ -28,7 +28,7 @@ test("filters exactly the selected MCP tools", async () => {
   const registered = [];
   const bridge = await initializeMcpBridge({
     config: {
-      servers: [{ url: "https://one.example/mcp", enabled_tools: ["add_numbers"] }],
+      servers: [{ name: "one", url: "https://one.example/mcp", enabled_tools: ["add_numbers"] }],
     },
     env: {},
     createClient: async () => fakeClient([
@@ -38,7 +38,7 @@ test("filters exactly the selected MCP tools", async () => {
     registerTool: (value) => registered.push(value),
   });
 
-  assert.deepEqual(registered.map((value) => value.name), ["add_numbers"]);
+  assert.deepEqual(registered.map((value) => value.name), ["mcp__one__add_numbers"]);
   await bridge.close();
 });
 
@@ -47,7 +47,7 @@ test("rejects a requested tool missing from tools/list", async () => {
   await assert.rejects(
     initializeMcpBridge({
       config: {
-        servers: [{ url: "https://one.example/mcp", enabled_tools: ["missing"] }],
+        servers: [{ name: "one", url: "https://one.example/mcp", enabled_tools: ["missing"] }],
       },
       env: {},
       createClient: async () => fakeClient([tool("add_numbers")], {
@@ -60,25 +60,25 @@ test("rejects a requested tool missing from tools/list", async () => {
   assert.equal(closed, true);
 });
 
-test("rejects duplicate exposed tool names across servers", async () => {
-  let closes = 0;
-  await assert.rejects(
-    initializeMcpBridge({
-      config: {
-        servers: [
-          { url: "https://one.example/mcp" },
-          { url: "https://two.example/mcp" },
-        ],
-      },
-      env: {},
-      createClient: async () => fakeClient([tool("lookup")], {
-        close: async () => { closes++; },
-      }),
-      registerTool: () => assert.fail("must not register tools"),
-    }),
-    /duplicate MCP tool "lookup".*one\.example.*two\.example/,
-  );
-  assert.equal(closes, 2);
+test("allows the same MCP tool name in different native namespaces", async () => {
+  const registered = [];
+  const bridge = await initializeMcpBridge({
+    config: {
+      servers: [
+        { name: "one", url: "https://one.example/mcp" },
+        { name: "two", url: "https://two.example/mcp" },
+      ],
+    },
+    env: {},
+    createClient: async () => fakeClient([tool("lookup")]),
+    registerTool: (value) => registered.push(value),
+  });
+
+  assert.deepEqual(registered.map((value) => value.name), [
+    "mcp__one__lookup",
+    "mcp__two__lookup",
+  ]);
+  await bridge.close();
 });
 
 test("expands headers before creating the MCP client", async () => {
@@ -86,14 +86,15 @@ test("expands headers before creating the MCP client", async () => {
   const bridge = await initializeMcpBridge({
     config: {
       servers: [{
+        name: "one",
         url: "https://one.example/mcp",
         headers: {
-          Authorization: "__KAGENT_ENV[KAGENT_CREDENTIAL_0123ABCD]__",
+          Authorization: "__KAGENT_ENV[KAGENT_PI_MCP_CREDENTIAL_0123ABCD]__",
           "X-Tenant": "public",
         },
       }],
     },
-    env: { KAGENT_CREDENTIAL_0123ABCD: "Bearer secret" },
+    env: { KAGENT_PI_MCP_CREDENTIAL_0123ABCD: "Bearer secret" },
     createClient: async (server) => {
       observed = server;
       return fakeClient([]);
@@ -112,7 +113,7 @@ test("forwards MCP arguments and abort signal to tools/call", async () => {
   const registered = [];
   let observed;
   const bridge = await initializeMcpBridge({
-    config: { servers: [{ url: "https://one.example/mcp" }] },
+    config: { servers: [{ name: "one", url: "https://one.example/mcp" }] },
     env: {},
     createClient: async () => fakeClient([tool("lookup")], {
       callTool: async (name, args, signal) => {
@@ -138,7 +139,7 @@ test("forwards configured timeout to tools/list and tools/call", async () => {
   const registered = [];
   const observed = {};
   const bridge = await initializeMcpBridge({
-    config: { servers: [{ url: "https://one.example/mcp", timeout_seconds: 12.5 }] },
+    config: { servers: [{ name: "one", url: "https://one.example/mcp", timeout_seconds: 12.5 }] },
     env: {},
     createClient: async () => fakeClient([tool("lookup")], {
       listTools: async (timeoutSeconds) => {
@@ -156,6 +157,18 @@ test("forwards configured timeout to tools/list and tools/call", async () => {
   await registered[0].execute({}, new AbortController().signal);
   assert.deepEqual(observed, { list: 12.5, call: 12.5 });
   await bridge.close();
+});
+
+test("rejects invalid native MCP server names", async () => {
+  await assert.rejects(
+    initializeMcpBridge({
+      config: { servers: [{ name: "bad.name", url: "https://one.example/mcp" }] },
+      env: {},
+      createClient: async () => fakeClient([tool("lookup")]),
+      registerTool: () => assert.fail("must not register tools"),
+    }),
+    /invalid native name/,
+  );
 });
 
 test("converts MCP text and image content to Pi tool content", () => {
@@ -198,8 +211,8 @@ test("closes every initialized client in reverse order and is idempotent", async
   const bridge = await initializeMcpBridge({
     config: {
       servers: [
-        { url: "https://one.example/mcp" },
-        { url: "https://two.example/mcp" },
+        { name: "one", url: "https://one.example/mcp" },
+        { name: "two", url: "https://two.example/mcp" },
       ],
     },
     env: {},

@@ -26,7 +26,7 @@ spec:
     name: v1alpha3
     schema:
       openAPIV3Schema:
-        description: Harness defines a reusable agent runtime and infrastructure policy.
+        description: Harness defines a reusable agent runtime and its infrastructure policy.
         properties:
           apiVersion:
             description: |-
@@ -197,6 +197,9 @@ spec:
                     - message: modelConfigRef name must not be empty
                       rule: self.modelConfigRef.name.size() > 0
                 type: object
+              pi:
+                description: PiHarness selects the Pi runtime adapter.
+                type: object
               substrate:
                 description: HarnessSubstratePolicy contains the Substrate policy
                   shared by all runtime variants.
@@ -263,9 +266,9 @@ spec:
             - workload
             type: object
             x-kubernetes-validations:
-            - message: exactly one of kagent, codex, claude, or byo must be specified
+            - message: exactly one of kagent, codex, claude, pi, or byo must be specified
               rule: '(has(self.kagent) ? 1 : 0) + (has(self.codex) ? 1 : 0) + (has(self.claude)
-                ? 1 : 0) + (has(self.byo) ? 1 : 0) == 1'
+                ? 1 : 0) + (has(self.pi) ? 1 : 0) + (has(self.byo) ? 1 : 0) == 1'
             - message: BYO harnesses must specify workload.command
               rule: '!has(self.byo) || size(self.workload.command) > 0'
           status:
