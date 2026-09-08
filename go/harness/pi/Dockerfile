@@ -35,6 +35,7 @@ RUN npm install --prefix /usr/local/lib/kagent-pi \
 COPY harness/pi/extensions/kagent-mcp-core.mjs /usr/local/lib/kagent-pi/extensions/kagent-mcp-core.mjs
 COPY harness/pi/extensions/kagent-mcp-core.test.mjs /usr/local/lib/kagent-pi/extensions/kagent-mcp-core.test.mjs
 COPY harness/pi/extensions/kagent-mcp-error.test.mjs /usr/local/lib/kagent-pi/extensions/kagent-mcp-error.test.mjs
+COPY harness/pi/extensions/kagent-mcp-native.test.mjs /usr/local/lib/kagent-pi/extensions/kagent-mcp-native.test.mjs
 COPY harness/pi/extensions/kagent-mcp.ts /usr/local/lib/kagent-pi/extensions/kagent-mcp.ts
 RUN node --test /usr/local/lib/kagent-pi/extensions/*.test.mjs \
     && rm /usr/local/lib/kagent-pi/extensions/*.test.mjs \
