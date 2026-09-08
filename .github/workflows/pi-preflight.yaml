@@ -1,0 +1,85 @@
+name: Pi Preflight
+
+on:
+  push:
+    branches:
+      - ci/pi-preflight
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pr1-runtime:
+    name: PR1 runtime foundation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR1
+        uses: actions/checkout@v6
+        with:
+          ref: feat/pi-harness
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Pi unit tests
+        working-directory: go
+        run: go test ./harness/pi/...
+
+      - name: Compile Pi E2E package
+        working-directory: go
+        run: go test ./core/test/e2e -run '^$'
+
+      - name: Build Pi Harness image
+        run: docker build --progress=plain -f go/harness/pi/Dockerfile go
+
+  pr2-native:
+    name: PR2 native Harness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR2
+        uses: actions/checkout@v6
+        with:
+          ref: feat/pi-harness-native
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+          cache: true
+          cache-dependency-path: go/go.sum
+
+      - name: Generate controller output
+        run: |
+          make controller-manifests
+          git status --short
+          git diff --binary > /tmp/pi-generated.patch
+
+      - name: Set up envtest
+        working-directory: go
+        run: make setup-envtest
+
+      - name: Native Pi unit tests
+        working-directory: go
+        run: |
+          export KUBEBUILDER_ASSETS="$(make -s envtest-path)"
+          go test ./api/v1alpha3 ./core/internal/translator ./core/internal/translator/pi ./core/internal/controller ./core/internal/grpcserver ./harness/pi/...
+
+      - name: Compile native Pi E2E package
+        working-directory: go
+        run: go test ./core/test/e2e -run '^$'
+
+      - name: Build native Pi Harness image
+        run: docker build --progress=plain -f go/harness/pi/Dockerfile go
+
+      - name: Upload generated patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-generated-output
+          path: /tmp/pi-generated.patch
+          if-no-files-found: error
